@@ -144,7 +144,7 @@ class Microsoft::Exchange
             }
         )
 
-        user_free_busy.body[0][:get_user_availability_response][:elems][0][:free_busy_response_array][:elems].each_with_index {|r,index|
+       user_free_busy.body[0][:get_user_availability_response][:elems][0][:free_busy_response_array][:elems].each_with_index {|r,index|
             # Remove meta data (business hours and response type)
             resp = r[:free_busy_response][:elems][1][:free_busy_view][:elems].delete_if { |item| item[:free_busy_view_type] || item[:working_hours] }
 
@@ -163,11 +163,10 @@ class Microsoft::Exchange
                 free_rooms.push(rooms[index])
             end
         }
-
         free_rooms
     end
 
-    def get_bookings(email:, start_param:DateTime.now.midnight, end_param:(DateTime.now.midnight + 2.days))
+    def get_bookings(email:, start_param:DateTime.now.midnight, end_param:(DateTime.now.midnight + 2.days), use_act_as: false)
 	begin
         if [Integer, String].include?(start_param.class)
             start_param = DateTime.parse(Time.at(start_param.to_i / 1000).to_s)
@@ -177,8 +176,13 @@ class Microsoft::Exchange
         STDERR.puts "At email: #{email} with start: #{start_param} and end: #{end_param}"
         STDERR.puts '-------------------------------------------------'
         bookings = []
-        calendar_id = @ews_client.get_folder(:calendar, opts = {act_as: email }).id
-        events = @ews_client.find_items(folder_id: calendar_id, calendar_view: {start_date: start_param, end_date: end_param})
+        if use_act_as
+            calendar_id = @ews_client.get_folder(:calendar, opts = {act_as: email }).id
+            events = @ews_client.find_items(folder_id: calendar_id, calendar_view: {start_date: start_param, end_date: end_param})
+        else
+            @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], email)
+            events = @ews_client.find_items({:folder_id => :calendar, :calendar_view => {:start_date => start_param.utc.iso8601, :end_date => end_param.utc.iso8601}})
+        end
         # events = @ews_client.get_item(:calendar, opts = {act_as: email}).items
         events.each{|event|
             event.get_all_properties!

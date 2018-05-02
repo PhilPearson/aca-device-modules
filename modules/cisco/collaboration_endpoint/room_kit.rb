@@ -4,15 +4,12 @@ load File.join(__dir__, 'room_os.rb')
 load File.join(__dir__, 'ui_extensions.rb')
 load File.join(__dir__, 'external_source.rb')
 
-class Cisco::Spark::Sx80 < Cisco::Spark::RoomOs
-    include ::Cisco::Spark::Xapi::Mapper
-    include ::Cisco::Spark::UiExtensions
-    include ::Cisco::Spark::ExternalSource
+class Cisco::CollaborationEndpoint::RoomKit < Cisco::CollaborationEndpoint::RoomOs
+    include ::Cisco::CollaborationEndpoint::Xapi::Mapper
+    include ::Cisco::CollaborationEndpoint::UiExtensions
+    include ::Cisco::CollaborationEndpoint::ExternalSource
 
-    descriptive_name 'Cisco Spark SX80'
-    description <<~DESC
-        Device access requires an API user to be created on the endpoint.
-    DESC
+    descriptive_name 'Cisco Room Kit'
 
     tokenize delimiter: Tokens::COMMAND_RESPONSE,
              wait_ready: Tokens::LOGIN_COMPLETE
@@ -34,6 +31,7 @@ class Cisco::Spark::Sx80 < Cisco::Spark::RoomOs
     status 'Cameras PresenterTrack' => :presenter_track
     status 'Cameras SpeakerTrack' => :speaker_track
     status 'RoomAnalytics PeoplePresence' => :presence_detected
+    status 'RoomAnalytics PeopleCount Current' => :people_count
     status 'Conference DoNotDisturb' => :do_not_disturb
     status 'Conference Presentation Mode' => :presentation
     status 'Peripherals ConnectedDevice' => :peripherals
@@ -64,10 +62,10 @@ class Cisco::Spark::Sx80 < Cisco::Spark::RoomOs
             CallType_: [:Audio, :Video]
 
     command 'Camera PositionReset' => :camera_position_reset,
-            CameraId: (1..7),
+            CameraId: (1..1),
             Axis_: [:All, :Focus, :PanTilt, :Zoom]
     command 'Camera Ramp' => :camera_move,
-            CameraId: (1..7),
+            CameraId: (1..1),
             Pan_: [:Left, :Right, :Stop],
             PanSpeed_: (1..15),
             Tilt_: [:Down, :Up, :Stop],
@@ -78,10 +76,10 @@ class Cisco::Spark::Sx80 < Cisco::Spark::RoomOs
 
     command! 'Cameras AutoFocus Diagnostics Start' => \
              :autofocus_diagnostics_start,
-             CameraId: (1..7)
+             CameraId: (1..1)
     command! 'Cameras AutoFocus Diagnostics Stop' => \
              :autofocus_diagnostics_stop,
-             CameraId: (1..7)
+             CameraId: (1..1)
 
     command! 'Cameras PresenterTrack ClearPosition' => :presenter_track_clear
     command! 'Cameras PresenterTrack StorePosition' => :presenter_track_store

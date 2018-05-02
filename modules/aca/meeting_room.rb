@@ -316,8 +316,11 @@ class Aca::MeetingRoom < Aca::Joiner
         present_actual(source, display)
 
         # Switch Joined rooms to the sharing input (use skipme param)
-        perform_action(mod: :System, func: :do_share, args: [true, source.to_sym], skipMe: true).then do
-            system[:Switcher].switch(@defaults[:sharing_routes]) if @defaults[:sharing_routes]
+        promise = perform_action(mod: :System, func: :present_actual, args: [source, display], skipMe: true)
+        if @defaults[:sharing_routes]
+            promise.then do
+                system[:Switcher].switch(@defaults[:sharing_routes])
+            end
         end
     end
 
@@ -461,6 +464,7 @@ class Aca::MeetingRoom < Aca::Joiner
         logger.debug { "switch mode called for #{mode_name} -- #{!!@modes}" }
 
         return unless @modes
+        sys = system
 
         # ======================================================
         # Check if we want undo anything the previous mode setup
@@ -518,11 +522,12 @@ class Aca::MeetingRoom < Aca::Joiner
 
             # Update the inputs
             inps = (setting(:inputs) + (mode[:inputs] || [])) - (mode[:remove_inputs] || [])
+            inps.uniq!
             inps.each do |input|
                 inp = setting(input) || mode[input]
 
                 if inp
-                    self[input] = Set.new(inp + (mode[input] || [])).to_a
+                    self[input] = Set.new((mode[input] || []) + inp).to_a
                     self[input].each do |source|
                         @input_tab_mapping[source.to_sym] = input
                     end
@@ -551,7 +556,6 @@ class Aca::MeetingRoom < Aca::Joiner
             begin
                 powerup unless setting(:ignore_modes) || booting
             ensure
-                sys = system
                 if mode[:audio_preset]
                     mixer = sys[:Mixer]
                     Array(mode[:audio_preset]).each { |preset| mixer.trigger(preset) }
@@ -589,7 +593,7 @@ class Aca::MeetingRoom < Aca::Joiner
     #
 
     def powerup
-        switch_mode(@defaults[:default_mode], booting: true) if @defaults && @defaults[:default_mode] && self[:state] != :online
+        switch_mode(@defaults[:default_mode], booting: true) if @defaults && @defaults[:default_mode] && self[:state] != :online && !self[:is_joined]
 
         # Keep track of displays from neighboring rooms
         @setCamDefaults = true
@@ -878,6 +882,7 @@ class Aca::MeetingRoom < Aca::Joiner
 
     def vc_mute_actual(mute)
         system[:Mixer].mute(self[:mics_mutes], mute) if self[:mics_mutes]
+        system.all(:CeilingMic).led_colour_unmuted(mute ? :red : :green)
     end
 
     def start_cameras
@@ -905,6 +910,12 @@ class Aca::MeetingRoom < Aca::Joiner
             system[:Switcher].switch({input => output})
         else
             system[:VidConf].select_camera(input)
+
+            # Check if we need to do any video switching
+            src = self[:sources][source]
+            inp = src[:input]
+            out = src[:output]
+            system[:Switcher].switch({inp => out}) if inp && out
         end
     end
 

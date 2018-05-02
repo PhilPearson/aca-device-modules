@@ -96,6 +96,8 @@ class Aca::ExchangeBooking
         self[:hide_all] = setting(:hide_all) || false
         self[:touch_enabled] = setting(:touch_enabled) || false
         self[:name] = self[:room_name] = setting(:room_name) || system.name
+        self[:description] = setting(:description) || nil
+        self[:title] = setting(:title) || nil
         self[:timeout] = setting(:timeout) || false
 
         self[:control_url] = setting(:booking_control_url) || system.config.support_url
@@ -109,7 +111,9 @@ class Aca::ExchangeBooking
         self[:last_meeting_started] = setting(:last_meeting_started)
         self[:cancel_meeting_after] = setting(:cancel_meeting_after)
         self[:booking_min_duration] = setting(:booking_min_duration)
+        self[:booking_disable_future] = setting(:booking_disable_future)
         self[:booking_max_duration] = setting(:booking_max_duration)
+        self[:timeout] = setting(:timeout)
 
         @check_meeting_ending = setting(:check_meeting_ending) # seconds before meeting ending
         @extend_meeting_by = setting(:extend_meeting_by) || 15.minutes.to_i
@@ -198,7 +202,7 @@ class Aca::ExchangeBooking
 
         schedule.clear
         schedule.in(rand(10000)) { fetch_bookings }
-        schedule.every((setting(:update_every) || 120000) + rand(10000)) { fetch_bookings }
+        schedule.every((setting(:update_every) || 120000).to_i + rand(10000)) { fetch_bookings }
     end
 
 
@@ -372,6 +376,8 @@ class Aca::ExchangeBooking
             if start_time.class == Integer
                 delete_ews_booking (start_time / 1000).to_i
             else
+                # Converts to time object regardless of start_time being string or time object
+                start_time = Time.parse(start_time.to_s)
                 delete_ews_booking start_time.to_i
             end
         }.then(proc { |count|
