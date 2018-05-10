@@ -45,8 +45,6 @@ class Aca::Router
             logger.error 'invalid connection settings'
         end
 
-        check_compatability
-
         # TODO: track active signal source at each node and expose as a hash
         self[:nodes] = signal_graph.map(&:id)
         self[:inputs] = signal_graph.sinks.map(&:id)
@@ -179,36 +177,22 @@ class Aca::Router
     end
 
     def activate(edge)
-        if edge.output.nil?
-            system[edge.device].switch_to edge.input
+        mod = system[edge.device]
+
+        if edge.nx1? && mod.respond_to?(:switch_to)
+            mod.switch_to edge.input
+
+        elsif edge.nxn? && mod.respond_to?(:switch)
+            mod.switch edge.input => edge.output
+
+        elsif edge.nx1? && signal_graph.outdegree(edge.source) == 1
+            logger.warn "cannot perform switch on #{edge.device}. " \
+                "This may be ok as only one input (#{edge.target}) is defined."
+            thread.defer.resolve
+
         else
-            system[edge.device].switch edge.input => edge.output
-        end
-    end
-
-    # TODO: execute this on system device create / remove / stop / start etc
-    def check_compatability
-        invalid = Set.new
-
-        signal_graph.each do |node|
-            node.edges.each_pair do |_, edge|
-                mod = system[edge.device]
-
-                is_switch = edge.output.nil? && mod.respond_to?(:switch_to)
-                is_matrix = !edge.output.nil? && mod.respond_to?(:switch)
-
-                invalid << edge.device if mod.nil? || !(is_switch || is_matrix)
-            end
-        end
-
-        if invalid.empty?
-            true
-        else
-            logger.warn do
-                modules = invalid.to_a.join ', '
-                "incompatible or non-existent modules in config: #{modules}"
-            end
-            false
+            thread.defer.reject "cannot interact with #{edge.device}. " \
+                'Module may be offline or incompatible.'
         end
     end
 end
@@ -229,6 +213,16 @@ class Aca::Router::SignalGraph
     Edge = Struct.new :source, :target, :device, :input, :output do
         def to_s
             "#{target} to #{device} (in #{input})"
+        end
+
+        # Check if the edge is a switchable input on a single output device
+        def nx1?
+            output.nil?
+        end
+
+        # Check if the edge a matrix switcher / multi-output device
+        def nxn?
+            !nx1?
         end
     end
 
