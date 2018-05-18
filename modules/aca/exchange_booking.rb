@@ -114,12 +114,15 @@ class Aca::ExchangeBooking
         self[:booking_disable_future] = setting(:booking_disable_future)
         self[:booking_max_duration] = setting(:booking_max_duration)
         self[:timeout] = setting(:timeout)
+        self[:arrow_direction] = setting(:arrow_direction)
+        self[:icon] = setting(:icon)
 
         @check_meeting_ending = setting(:check_meeting_ending) # seconds before meeting ending
         @extend_meeting_by = setting(:extend_meeting_by) || 15.minutes.to_i
 
         # Skype join button available 2min before the start of a meeting
         @skype_start_offset = setting(:skype_start_offset) || 120
+        @skype_check_offset = setting(:skype_check_offset) || 380 # 5min + 20 seconds
 
         # Skype join button not available in the last 8min of a meeting
         @skype_end_offset = setting(:skype_end_offset) || 480
@@ -387,6 +390,9 @@ class Aca::ExchangeBooking
             self[:meeting_pending] = start_time
             self[:meeting_ending] = false
             self[:meeting_pending_notice] = false
+
+            fetch_bookings
+            true
         }, proc { |error|
             logger.print_error error, 'removing ews booking'
         })
@@ -428,7 +434,6 @@ class Aca::ExchangeBooking
             raise "missing required fields: #{check}"
         end
 
-
         req_params = {}
         req_params[:room_email] = @ews_room
         req_params[:subject] = options[:title]
@@ -451,6 +456,7 @@ class Aca::ExchangeBooking
                 make_ews_booking req_params
             end
         }.then(proc { |id|
+            fetch_bookings
             logger.debug { "successfully created booking: #{id}" }
             "Ok"
         }, proc { |error|
@@ -705,7 +711,8 @@ class Aca::ExchangeBooking
 
             # Extract the skype meeting URL
             if set_skype_url
-                start_integer = real_start.to_i - @skype_start_offset
+                start_integer = real_start.to_i - @skype_check_offset
+                join_integer = real_start.to_i - @skype_start_offset
                 end_integer = real_end.to_i - @skype_end_offset
 
                 if now_int > start_integer && now_int < end_integer
@@ -718,7 +725,12 @@ class Aca::ExchangeBooking
                         if body_parts.length > 1
                             links = body_parts[-1].split('"').select { |link| link.start_with?('https://') }
                             if links[0].present?
-                                self[:can_join_skype_meeting] = true
+                                if now_int > join_integer
+                                    self[:can_join_skype_meeting] = true
+                                    self[:skype_meeting_pending] = true
+                                else
+                                    self[:skype_meeting_pending] = true
+                                end
                                 set_skype_url = false
                                 system[:Skype].set_uri(links[0]) if skype_exists
                             end
@@ -742,6 +754,11 @@ class Aca::ExchangeBooking
 
             subject = item[:subject]
 
+            # Set subject to private if sensitive
+            if ['private', 'confidential'].include?(meeting.sensitivity.downcase)
+                subject = "Private"
+            end
+
             {
                 :Start => start,
                 :End => ending,
@@ -756,6 +773,7 @@ class Aca::ExchangeBooking
 
         if set_skype_url
             self[:can_join_skype_meeting] = false
+            self[:skype_meeting_pending] = false
             system[:Skype].set_uri(nil) if skype_exists
         end
 

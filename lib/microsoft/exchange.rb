@@ -1,6 +1,5 @@
 require 'active_support/time'
 require 'logger'
-require 'viewpoint2'
 
 module Microsoft; end
 
@@ -15,6 +14,12 @@ class Microsoft::Exchange
             internet_proxy:nil,
             logger: Rails.logger
         )
+        begin
+            require 'viewpoint2'
+            rescue LoadError
+            STDERR.puts 'VIEWPOINT NOT PRESENT'
+            STDERR.flush
+        end
         @ews_url = ews_url
         @service_account_email = service_account_email
         @service_account_password = service_account_password
@@ -35,8 +40,24 @@ class Microsoft::Exchange
         @ews_client.ews.connection.httpcli.reset_all
     end
 
-    def email_list(field, name=nil)
-        field[:email_addresses][:elems][-1][:entry][:text].gsub(/SMTP:|SIP:|sip:|smtp:/,'')
+    def username(field, name=nil)
+        username = field[:email_addresses][:elems][0][:entry][:text].split("@")[0]
+        if ['smt','sip'].include?(username.downcase[0..2])
+            username = username.gsub(/SMTP:|SIP:|sip:|smtp:/,'')
+        else
+            username = field[:email_addresses][:elems][-1][:entry][:text].split("@")[0]
+            if ['smt','sip'].include?(username.downcase[0..2])
+                username = username.gsub(/SMTP:|SIP:|sip:|smtp:/,'')
+            else
+                username = field[:email_addresses][:elems][1][:entry][:text].split("@")[0]
+                if ['smt','sip'].include?(username.downcase[0..2])
+                    username = username.gsub(/SMTP:|SIP:|sip:|smtp:/,'')
+                else
+                    username = nil
+                end
+            end
+        end
+        username
     end
 
     def phone_list(field, name=nil)
@@ -62,10 +83,10 @@ class Microsoft::Exchange
         users = []
         fields = {
             display_name: 'name:basic_text',
-            # email_addresses: 'email:email_list',
             phone_numbers: 'phone:phone_list',
             culture: 'locale:basic_text',
-            department: 'department:basic_text'
+            department: 'department:basic_text',
+            email_addresses: 'id:username'
         }
         keys = fields.keys
         ews_users.each do |user|
@@ -214,14 +235,32 @@ class Microsoft::Exchange
 	end
     end
 
-    def create_booking(room_email:, start_param:, end_param:, subject:, description:nil, current_user:, attendees: nil, timezone:'Sydney')
-        description = String(description)
+    def create_booking(room_email:, start_param:, end_param:, subject:, description:nil, current_user:, attendees: nil, timezone:'Sydney', use_act_as: false)
+        STDERR.puts "CREATING NEW BOOKING IN LIBRARY"
+        STDERR.puts "room_email is #{room_email}"
+        STDERR.puts "start_param is #{start_param}"
+        STDERR.puts "end_param is #{end_param}"
+        STDERR.puts "subject is #{subject}"
+        STDERR.puts "description is #{description}"
+        STDERR.puts "current_user is #{current_user}"
+        STDERR.puts "attendees is #{attendees}"
+        STDERR.puts "timezone is #{timezone}"
+        STDERR.flush
+        # description = String(description)
         attendees = Array(attendees)
 
 
         booking = {}
         booking[:subject] = subject
         booking[:title] = subject
+        # booking[:location] = room_email
+        booking[:resources] = [{
+            attendee: {
+                mailbox: {
+                    email_address: room_email
+                }
+            }
+        }]
         booking[:start] = Time.at(start_param.to_i / 1000).utc.iso8601.chop
         # booking[:body] = description
         booking[:end] = Time.at(end_param.to_i / 1000).utc.iso8601.chop
@@ -229,18 +268,33 @@ class Microsoft::Exchange
             attendee: { mailbox: { email_address: current_user.email } }
         }]
         attendees.each do |attendee|
+            if attendee.class != String
+                attendee = attendee['email']
+            end
             booking[:required_attendees].push({
                 attendee: { mailbox: { email_address: attendee}}
             })
         end
-
-        folder = @ews_client.get_folder(:calendar, { act_as: room_email })
+        booking[:required_attendees].push({
+                attendee: { mailbox: { email_address: room_email}}
+            })
+        booking[:body] = description
+        STDERR.puts "MAKING REQUEST WITH"
+        STDERR.puts booking
+        STDERR.flush
+        if use_act_as
+            folder = @ews_client.get_folder(:calendar, { act_as: room_email })
+        else
+            @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], current_user.email)
+            folder = @ews_client.get_folder(:calendar)
+        end
         appointment = folder.create_item(booking)
         {
             id: appointment.id,
             start: start_param,
             end: end_param,
             attendees: attendees,
+            # location: Orchestrator::ControlSystem.find_by_email(room_email).name,
             subject: subject
         }
     end
