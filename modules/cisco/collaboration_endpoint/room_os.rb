@@ -55,6 +55,8 @@ class Cisco::CollaborationEndpoint::RoomOs
             schedule.every('30s') { heartbeat timeout: 35 }
         end
 
+        push_config
+
         sync_config
     end
 
@@ -116,7 +118,7 @@ class Cisco::CollaborationEndpoint::RoomOs
     # @param settings [Hash] the configuration values to apply
     # @param [::Libuv::Q::Promise] resolves when the commands complete
     def xconfiguration(path, settings)
-        send_xconfigurations path, settings
+        send_xconfigurations path => settings
     end
 
     # Trigger a status update for the specified path.
@@ -142,6 +144,10 @@ class Cisco::CollaborationEndpoint::RoomOs
 
     # Perform the actual command execution - this allows device implementations
     # to protect access to #xcommand and still refer the gruntwork here.
+    #
+    # @param comand [String] the xAPI command to execute
+    # @param args [Hash] the command keyword args
+    # @return [::Libuv::Q::Promise] that will resolve when execution is complete
     def send_xcommand(command, args = {})
         request = Action.xcommand command, args
 
@@ -174,6 +180,11 @@ class Cisco::CollaborationEndpoint::RoomOs
     end
 
     # Apply a single configuration on the device.
+    #
+    # @param path [String] the configuration path
+    # @param setting [String] the configuration parameter
+    # @param value [#to_s] the configuration value
+    # @return [::Libuv::Q::Promise]
     def send_xconfiguration(path, setting, value)
         request = Action.xconfiguration path, setting, value
 
@@ -190,10 +201,21 @@ class Cisco::CollaborationEndpoint::RoomOs
     end
 
     # Apply a set of configurations.
-    def send_xconfigurations(path, settings)
+    #
+    # @param config [Hash] a deeply nested hash of the configurations to apply
+    # @return [::Libuv::Q::Promise]
+    def send_xconfigurations(config)
+        # Reduce the config to a strucure of { [path] => value }
+        flatten = lambda do |h, path = [], settings = {}|
+            return settings.update(path => h) unless h.is_a? Hash
+            h.each { |key, subtree| flatten[subtree, path + [key], settings] }
+            settings
+        end
+        config = flatten[config]
+
         # The API only allows a single setting to be applied with each request.
-        interactions = settings.to_a.map do |(setting, value)|
-            send_xconfiguration(path, setting, value)
+        interactions = config.map do |(*path, setting), value|
+            send_xconfiguration path, setting, value
         end
 
         thread.finally(interactions).then do |results|
@@ -201,12 +223,7 @@ class Cisco::CollaborationEndpoint::RoomOs
             if resolved.all?
                 :success
             else
-                failures = resolved.zip(settings.keys)
-                                   .reject(&:first)
-                                   .map(&:last)
-
-                thread.defer.reject 'Could not apply all settings. ' \
-                    "Failed on #{failures.join ', '}."
+                thread.defer.reject 'Failed to apply all settings.'
             end
         end
     end
@@ -215,6 +232,7 @@ class Cisco::CollaborationEndpoint::RoomOs
     #
     # @param path [String]
     # @yield [response] a pre-parsed response object for the status query
+    # @return [::Libuv::Q:Promise]
     def send_xstatus(path)
         request = Action.xstatus path
 
@@ -355,6 +373,11 @@ class Cisco::CollaborationEndpoint::RoomOs
         send_xstatus path do |value|
             self[status_key] = value
         end
+    end
+
+    def push_config
+        config = setting(:device_config) || {}
+        send_xconfigurations config
     end
 
     def sync_config
