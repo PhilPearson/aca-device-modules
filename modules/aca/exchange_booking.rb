@@ -92,6 +92,7 @@ class Aca::ExchangeBooking
         self[:swiped] ||= 0
         @last_swipe_at = 0
         @use_act_as = setting(:use_act_as)
+        @has_skype = setting(:has_skype) || false
 
         self[:hide_all] = setting(:hide_all) || false
         self[:touch_enabled] = setting(:touch_enabled) || false
@@ -112,7 +113,6 @@ class Aca::ExchangeBooking
         self[:cancel_meeting_after] = setting(:cancel_meeting_after)
         self[:booking_min_duration] = setting(:booking_min_duration)
         self[:booking_disable_future] = setting(:booking_disable_future)
-        self[:has_skype] = setting(:has_skype) || false
         self[:booking_max_duration] = setting(:booking_max_duration)
         self[:timeout] = setting(:timeout)
         self[:arrow_direction] = setting(:arrow_direction)
@@ -697,7 +697,7 @@ class Aca::ExchangeBooking
             items = cli.find_items({:folder_id => :calendar, :calendar_view => {:start_date => start.utc.iso8601, :end_date => ending.utc.iso8601}})
         end
 
-        if has_skype
+        if @has_skype
             skype_exists = set_skype_url = system.exists?(:Skype)
             set_skype_url = true if @force_skype_extract
         end
@@ -713,7 +713,7 @@ class Aca::ExchangeBooking
             real_end = Time.parse(ending)
 
             # Extract the skype meeting URL
-            if has_skype && set_skype_url
+            if @has_skype && set_skype_url
                 start_integer = real_start.to_i - @skype_check_offset
                 join_integer = real_start.to_i - @skype_start_offset
                 end_integer = real_end.to_i - @skype_end_offset
@@ -774,7 +774,7 @@ class Aca::ExchangeBooking
             }
         end
 
-        if has_skype && set_skype_url
+        if @has_skype && set_skype_url
             self[:can_join_skype_meeting] = false
             self[:skype_meeting_pending] = false
             system[:Skype].set_uri(nil) if skype_exists
