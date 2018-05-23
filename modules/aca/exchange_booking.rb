@@ -757,18 +757,18 @@ class Aca::ExchangeBooking
 
             subject = item[:subject]
 
-            # Set subject to private if sensitive
-            STDERR.puts "MEETING SENSITIVITY IS"
-            STDERR.puts meeting.sensitivity.downcase
-            STDERR.flush
-            if ['private', 'confidential'].include?(meeting.sensitivity.downcase)
+
+            if ['private', 'confidential'].include?(meeting.sensitivity.downcase) || subject.nil? || subject.empty?
                 subject = "Private"
+            else
+                subject = subject[:text]
             end
+
 
             {
                 :Start => start,
                 :End => ending,
-                :Subject => subject ? subject[:text] : "Private",
+                :Subject => subject
                 :owner => item[:organizer][:elems][0][:mailbox][:elems][0][:name][:text],
                 :setup => 0,
                 :breakdown => 0,
