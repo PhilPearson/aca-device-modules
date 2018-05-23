@@ -768,7 +768,7 @@ class Aca::ExchangeBooking
             {
                 :Start => start,
                 :End => ending,
-                :Subject => subject
+                :Subject => subject,
                 :owner => item[:organizer][:elems][0][:mailbox][:elems][0][:name][:text],
                 :setup => 0,
                 :breakdown => 0,
