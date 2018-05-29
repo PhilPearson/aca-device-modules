@@ -178,34 +178,30 @@ DESC
     end
 
 
-    SCALE = {
+    SCALE_MODE = {
         fill: 0x09,
         fit:  0x20
     }.tap { |x| x.merge!(x.invert).freeze }
 
-    def split(enable = On, inputs = [:hdmi2, :hdmi3, :hdmi4], layout = 0, options = {})
-        unless (2..3).cover? inputs.size
-            logger.error 'display can only be split between 3 or 4 sources ' \
-                '(including current primary source)'
-            return
-        end
-
-        enable = is_affirmative? enable
+    # Activite the internal compositor. Can either split 3 or 4 ways.
+    def split(inputs = [:hdmi, :hdmi2, :hdmi3], layout: 0, scale: :fit, **options)
+        main_source = inputs.shift
 
         data = [
-            enable ? 1 : 0,
-            0,              # sound from screen section 1
-            layout,         # layout mode (1..6)
-            SCALE[:fit],    # scaling for main source
+            1,                  # enable
+            0,                  # sound from screen section 1
+            layout,             # layout mode (1..6)
+            SCALE_MODE[scale],  # scaling for main source
             inputs.flat_map do |input|
                 input = input.to_sym if input.is_a? String
-                [INPUTS[input], SCALE[:fit]]
+                [INPUTS[input], SCALE_MODE[scale]]
             end
         ].flatten
 
-        do_send(:screen_split, data, options)
+        switch_to(main_source, options).then do
+            do_send(:screen_split, data, options)
+        end
     end
-
 
     def volume(vol, options = {})
         vol = in_range(vol.to_i, 100)
@@ -333,45 +329,49 @@ DESC
         logger.debug { "Samsung sent #{byte_to_hex(response)}" }
 
         data = str_to_array(response)
-        if data[2] == 3     # Check for correct data length
-            status = data[3]
-            command = data[4]
-            value = data[5]
 
-            if status == 0x41 # 'A'
-                case COMMAND[command]
-                when :panel_mute
-                    self[:power] = value == 0
-                when :volume
-                    self[:volume] = value
-                    if self[:audio_mute] && value > 0
-                        self[:audio_mute] = false
-                    end
-                when :brightness
-                    self[:brightness] = value
-                when :input
-                    self[:input] = INPUTS[value]
-                    if not self[:input_stable]
-                        if self[:input_target] == self[:input]
-                            self[:input_stable] = true
-                        else
-                            switch_to(self[:input_target])
-                        end
-                    end
-                when :speaker
-                    self[:speaker] = Speaker_Modes[value]
-                when :hard_off
-                    self[:hard_off] = value == 0
+        len = data[2]
+        status = data[3]
+        command = data[4]
+        value = len == 1 ? data[5] : data[5, len]
+
+        case status
+        when 0x41 # Ack
+            case COMMAND[command]
+            when :panel_mute
+                self[:power] = value == 0
+            when :volume
+                self[:volume] = value
+                if self[:audio_mute] && value > 0
+                    self[:audio_mute] = false
                 end
-
-                return :success
-            else
-                logger.debug "Samsung failed with: #{byte_to_hex(array_to_str(data))}"
-                return :failed  # Failed response
+            when :brightness
+                self[:brightness] = value
+            when :input
+                self[:input] = INPUTS[value]
+                if not self[:input_stable]
+                    if self[:input_target] == self[:input]
+                        self[:input_stable] = true
+                    else
+                        switch_to(self[:input_target])
+                    end
+                end
+            when :speaker
+                self[:speaker] = Speaker_Modes[value]
+            when :hard_off
+                self[:hard_off] = value == 0
+            when :screen_split
+                self[:screen_split] = value.positive?
             end
+            :success
+
+        when 0x4e # Nak
+            logger.debug "Samsung failed with: #{byte_to_hex(array_to_str(data))}"
+            :failed  # Failed response
+
         else
             logger.debug "Samsung aborted with: #{byte_to_hex(array_to_str(data))}"
-            return :abort   # unknown result
+            :abort   # unknown result
         end
     end
 
