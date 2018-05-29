@@ -92,7 +92,6 @@ class Aca::ExchangeBooking
         self[:swiped] ||= 0
         @last_swipe_at = 0
         @use_act_as = setting(:use_act_as)
-        @has_skype = setting(:has_skype) || false
 
         self[:hide_all] = setting(:hide_all) || false
         self[:touch_enabled] = setting(:touch_enabled) || false
@@ -402,6 +401,7 @@ class Aca::ExchangeBooking
     # If last meeting started !== meeting pending then
     #  we'll show a warning on the in room touch panel
     def set_meeting_pending(meeting_ref)
+        return if self[:last_meeting_started] == meeting_ref
         self[:meeting_ending] = false
         self[:meeting_pending] = meeting_ref
         self[:meeting_pending_notice] = true
@@ -510,7 +510,9 @@ class Aca::ExchangeBooking
         return false unless starting
 
         ending = starting + @extend_meeting_by
-        create_meeting start: starting * 1000, end: ending * 1000, title: @current_meeting_title
+        create_meeting(start: starting * 1000, end: ending * 1000, title: @current_meeting_title).then do
+            start_meeting(starting * 1000)
+        end
     end
 
 
@@ -697,10 +699,8 @@ class Aca::ExchangeBooking
             items = cli.find_items({:folder_id => :calendar, :calendar_view => {:start_date => start.utc.iso8601, :end_date => ending.utc.iso8601}})
         end
 
-        if @has_skype
-            skype_exists = set_skype_url = system.exists?(:Skype)
-            set_skype_url = true if @force_skype_extract
-        end
+        skype_exists = set_skype_url = system.exists?(:Skype)
+        set_skype_url = true if @force_skype_extract
         now_int = now.to_i
 
         items.select! { |booking| !booking.cancelled? }
@@ -713,7 +713,7 @@ class Aca::ExchangeBooking
             real_end = Time.parse(ending)
 
             # Extract the skype meeting URL
-            if @has_skype && set_skype_url
+            if set_skype_url
                 start_integer = real_start.to_i - @skype_check_offset
                 join_integer = real_start.to_i - @skype_start_offset
                 end_integer = real_end.to_i - @skype_end_offset
@@ -757,18 +757,15 @@ class Aca::ExchangeBooking
 
             subject = item[:subject]
 
-
-            if ['private', 'confidential'].include?(meeting.sensitivity.downcase) || subject.nil? || subject.empty?
+            # Set subject to private if sensitive
+            if ['private', 'confidential'].include?(meeting.sensitivity.downcase)
                 subject = "Private"
-            else
-                subject = subject[:text]
             end
-
 
             {
                 :Start => start,
                 :End => ending,
-                :Subject => subject,
+                :Subject => subject ? subject[:text] : "Private",
                 :owner => item[:organizer][:elems][0][:mailbox][:elems][0][:name][:text],
                 :setup => 0,
                 :breakdown => 0,
@@ -777,7 +774,7 @@ class Aca::ExchangeBooking
             }
         end
 
-        if @has_skype && set_skype_url
+        if set_skype_url
             self[:can_join_skype_meeting] = false
             self[:skype_meeting_pending] = false
             system[:Skype].set_uri(nil) if skype_exists
