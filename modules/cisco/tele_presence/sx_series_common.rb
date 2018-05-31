@@ -8,6 +8,7 @@ module Cisco::TelePresence::SxSeriesCommon
     end
     
     def on_update
+        @corporate_dir = setting(:use_corporate_directory) || false
         @default_source = setting(:presentation) || 3
         @count = 0
     end
@@ -107,16 +108,22 @@ module Cisco::TelePresence::SxSeriesCommon
     end
 
     SearchDefaults = {
-        :PhonebookType => :Local, # Should probably make this a setting
+        :PhonebookType => :Local,
         :Limit => 10,
         :ContactType => :Contact,
         :SearchField => :Name
     }
     def search(text, opts = {})
+        opts[:PhonebookType] ||= 'Corporate' if @corporate_dir
         opts = SearchDefaults.merge(opts)
         opts[:SearchString] = text
         command(:phonebook, :search, params(opts), name: :phonebook, max_waits: 400)
     end
+    
+    def clear_search_results
+        self[:search_results] = nil
+    end
+
 
     # Options include: auto, custom, equal, fullscreen, overlay, presentationlargespeaker, presentationsmallspeaker, prominent, single, speaker_full
     def layout(mode, target = :local)
@@ -303,7 +310,7 @@ module Cisco::TelePresence::SxSeriesCommon
 
     def process_results(result)
         case result[1].downcase.to_sym
-        when :resultset
+        when :phonebooksearchresult, :resultset
             @listing_phonebook = true
 
             case result[2]

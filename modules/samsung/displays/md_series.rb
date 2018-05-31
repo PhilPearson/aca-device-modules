@@ -12,7 +12,7 @@ class Samsung::Displays::MdSeries
 
     # Discovery Information
     tcp_port 1515
-    descriptive_name 'Samsung MD & DM Series LCD'
+    descriptive_name 'Samsung MD, DM & QM Series LCD'
     generic_name :Display
 
 # Markdown description
@@ -97,7 +97,8 @@ DESC
         :speaker => 0x68,
         :net_standby => 0xB5,   # Keep NIC active in standby
         :eco_solution => 0xE6,  # Eco options (auto power off)
-        :auto_power => 0x33
+        :auto_power => 0x33,
+        :screen_split => 0xB2    # Tri / quad split (larger panels only)
     }
     COMMAND.merge!(COMMAND.invert)
 
@@ -158,6 +159,8 @@ DESC
         :hdmi2_pc => 0x24,
         :hdmi3 => 0x31,
         :hdmi3_pc => 0x32,
+        :hdmi4 => 0x33,
+        :hdmi4_pc => 0x34,
         :display_port => 0x25,
         :dtv => 0x40,
         :media => 0x60,
@@ -172,6 +175,32 @@ DESC
         self[:input_stable] = false
         self[:input_target] = input
         do_send(:input, INPUTS[input], options)
+    end
+
+
+    SCALE_MODE = {
+        fill: 0x09,
+        fit:  0x20
+    }.tap { |x| x.merge!(x.invert).freeze }
+
+    # Activite the internal compositor. Can either split 3 or 4 ways.
+    def split(inputs = [:hdmi, :hdmi2, :hdmi3], layout: 0, scale: :fit, **options)
+        main_source = inputs.shift
+
+        data = [
+            1,                  # enable
+            0,                  # sound from screen section 1
+            layout,             # layout mode (1..6)
+            SCALE_MODE[scale],  # scaling for main source
+            inputs.flat_map do |input|
+                input = input.to_sym if input.is_a? String
+                [INPUTS[input], SCALE_MODE[scale]]
+            end
+        ].flatten
+
+        switch_to(main_source, options).then do
+            do_send(:screen_split, data, options)
+        end
     end
 
     def volume(vol, options = {})
@@ -296,60 +325,56 @@ DESC
         end
     end
 
+    RESPONSE_STATUS = {
+        ack: 0x41,
+        nak: 0x4e
+    }.tap { |x| x.merge!(x.invert).freeze }
+
     def received(response, resolve, command)
         logger.debug { "Samsung sent #{byte_to_hex(response)}" }
 
-        data = str_to_array(response)
-        if data[2] == 3     # Check for correct data length
-            status = data[3]
-            command = data[4]
-            value = data[5]
+        rx = str_to_array response
 
-            if status == 0x41 # 'A'
-                case COMMAND[command]
-                when :panel_mute
-                    self[:power] = value == 0
-                when :volume
-                    self[:volume] = value
-                    if self[:audio_mute] && value > 0
-                        self[:audio_mute] = false
-                    end
-                when :brightness
-                    self[:brightness] = value
-                when :input
-                    self[:input] = INPUTS[value]
-                    if not self[:input_stable]
-                        if self[:input_target] == self[:input]
-                            self[:input_stable] = true
-                        else
-                            switch_to(self[:input_target])
-                        end
-                    end
-                when :speaker
-                    self[:speaker] = Speaker_Modes[value]
-                when :hard_off
-                    self[:hard_off] = value == 0
-                end
+        unless rx.pop == (rx.reduce(:+) & 0xFF)
+            logger.error 'invalid checksum'
+            return :retry
+        end
 
-                return :success
-            else
-                logger.debug "Samsung failed with: #{byte_to_hex(array_to_str(data))}"
-                return :failed  # Failed response
+        _, _, _, status, command, *value = rx
+        value = value.first if value.length == 1
+
+        case RESPONSE_STATUS[status]
+        when :ack
+            case COMMAND[command]
+            when :panel_mute
+                self[:power] = value == 0
+            when :volume
+                self[:volume] = value
+                self[:audio_mute] = false if value > 0
+            when :brightness
+                self[:brightness] = value
+            when :input
+                self[:input] = INPUTS[value]
+                self[:input_stable] = self[:input] == self[:input_target]
+                switch_to self[:input_target] unless self[:input_stable]
+            when :speaker
+                self[:speaker] = Speaker_Modes[value]
+            when :hard_off
+                self[:hard_off] = value == 0
+            when :screen_split
+                state = value[0]
+                self[:screen_split] = state.positive?
             end
+            :success
+
+        when :nak
+            logger.debug "Samsung failed with: #{byte_to_hex(array_to_str(data))}"
+            :failed  # Failed response
+
         else
             logger.debug "Samsung aborted with: #{byte_to_hex(array_to_str(data))}"
-            return :abort   # unknown result
+            :abort   # unknown result
         end
-    end
-
-    # Currently not used. We could check it if we like :)
-    def check_checksum(byte_str)
-        response = str_to_array(byte_str)
-        check = 0
-        response[0..-2].each do |byte|
-            check = (check + byte) & 0xFF
-        end
-        response[-1] == check
     end
 
     # Called by the Abstract Tokenizer
@@ -366,15 +391,6 @@ DESC
         end
     end
 
-    # Called by do_send to create a checksum
-    def checksum(command)
-        check = 0
-        command.each do |byte|
-            check = (check + byte) & 0xFF
-        end
-        command << check
-    end
-
     def do_send(command, data = [], options = {})
         data = Array(data)
 
@@ -383,9 +399,10 @@ DESC
             command = COMMAND[command]
         end
 
-        data = [command, @id, data.length] + data    # Build request (0xFF is screen id)
-        checksum(data)                                # Add checksum
+        data = [command, @id, data.length] + data     # Build request
+        data << (data.reduce(:+) & 0xFF)              # Add checksum
         data = [0xAA] + data                          # Add header
+
         send(array_to_str(data), options)
     end
 end
