@@ -24,12 +24,9 @@ class TvOne::CorioMaster
             do_poll
         end
 
-        username = setting :username
-        password = setting :password
-        exec('login', username, password, priority: 99).then do
+        init_connection.then do
             query 'CORIOmax.Serial_Number',    expose_as: :serial_number
             query 'CORIOmax.Software_Version', expose_as: :firmware
-            sync_state
         end
     end
 
@@ -69,16 +66,25 @@ class TvOne::CorioMaster
     protected
 
 
+    def init_connection
+        username = setting :username
+        password = setting :password
+
+        exec('login', username, password, priority: 99).then { sync_state }
+    end
+
     def do_poll
         logger.debug 'polling device'
         query 'Preset.Take', expose_as: :preset
     end
 
     def sync_state
-        query 'Preset.Take',   expose_as: :preset
-        deep_query 'Windows',  expose_as: :windows
-        deep_query 'Canvases', expose_as: :canvases
-        deep_query 'Layouts',  expose_as: :layouts
+        thread.finally(
+            query('Preset.Take',   expose_as: :preset),
+            deep_query('Windows',  expose_as: :windows),
+            deep_query('Canvases', expose_as: :canvases),
+            deep_query('Layouts',  expose_as: :layouts)
+        )
     end
 
     # ------------------------------
