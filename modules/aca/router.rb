@@ -31,29 +31,7 @@ class Aca::Router
     end
 
     def on_update
-        logger.debug 'building graph from signal map'
-
-        @path_cache = nil
-
-        connections = setting(:connections).transform_values do |inputs|
-            # Read in numeric inputs as ints (as JSON based settings do not
-            # allow non-string keys)
-            if inputs.is_a? Hash
-                inputs.transform_keys! { |i| Integer(i) rescue i }
-            else
-                inputs
-            end
-        end
-        begin
-            @signal_graph = SignalGraph.from_map(connections).freeze
-        rescue
-            logger.error 'invalid connection settings'
-        end
-
-        # TODO: track active signal source at each node and expose as a hash
-        self[:nodes] = signal_graph.map(&:id)
-        self[:inputs] = signal_graph.sinks.map(&:id)
-        self[:outputs] = signal_graph.sources.map(&:id)
+        load_from_map setting(:connections)
     end
 
 
@@ -167,6 +145,18 @@ class Aca::Router
         end
     end
 
+    def load_from_map(connections)
+        logger.debug 'building graph from signal map'
+
+        @path_cache = nil
+        @signal_graph = SignalGraph.from_map(connections).freeze
+
+        # TODO: track active signal source at each node and expose as a hash
+        self[:nodes] = signal_graph.map(&:id)
+        self[:inputs] = signal_graph.sinks.map(&:id)
+        self[:outputs] = signal_graph.sources.map(&:id)
+    end
+
     # Find the shortest path between between two nodes and return a list of the
     # nodes which this passes through and their connecting edges.
     def route(source, sink)
@@ -183,7 +173,7 @@ class Aca::Router
         edges = []
         node = signal_graph[source]
         until node.nil?
-            nodes << node
+            nodes.unshift node
             predecessor = path.predecessor[node.id]
             edges << predecessor.edges[node.id] unless predecessor.nil?
             node = predecessor
@@ -194,7 +184,7 @@ class Aca::Router
         [nodes, edges]
     end
 
-    # Find the optimum combined paths requires to route a single source to
+    # Find the optimum combined paths required to route a single source to
     # multiple sink devices.
     def route_many(source, sinks, strict: false)
         node_exists = proc do |id|
@@ -300,9 +290,16 @@ class Aca::Router::SignalGraph
             @target = target
 
             meta = Meta.new.tap(&blk)
+            normalise_io = lambda do |x|
+                if x.is_a? String
+                    x[/^\d+$/]&.to_i || x.to_sym
+                else
+                    x
+                end
+            end
             @device = meta.device&.to_sym
-            @input  = meta.input.try(:to_sym) || meta.input
-            @output = meta.output.try(:to_sym) || meta.output
+            @input  = normalise_io[meta.input]
+            @output = normalise_io[meta.output]
         end
 
         def to_s
@@ -374,10 +371,8 @@ class Aca::Router::SignalGraph
     # to false to keep this O(1) rather than O(n). Using this flag at any other
     # time will result a corrupt structure.
     def delete(id, check_incoming_edges: true)
-        nodes.except! id
-
+        nodes.delete(id) { raise ArgumentError, "\"#{id}\" does not exist" }
         each { |node| node.edges.delete id } if check_incoming_edges
-
         self
     end
 
@@ -457,16 +452,58 @@ class Aca::Router::SignalGraph
         "{ #{to_a.join ', '} }"
     end
 
-    # Build a signal map from a nested hash of input connectivity.
+    # Pre-parse a connection map into a normalised nested hash structure
+    # suitable for parsing into the graph.
     #
-    # `map` should be of the structure
+    # This assumes the input map has been parsed from JSON so takes care of
+    # mapping keys back to integers (where suitable) and expanding sources
+    # specified as an array into a nested Hash. The target normalised output is
+    #
+    #     { device: { input: source } }
+    #
+    def self.normalise(map)
+        map.with_indifferent_access.transform_values! do |inputs|
+            case inputs
+            when Array
+                (1..inputs.size).zip(inputs).to_h
+            when Hash
+                inputs.transform_keys { |x| Integer(x) rescue x }
+            else
+                raise ArgumentError, 'inputs must be a Hash or Array'
+            end
+        end
+    end
+
+    # Extract module references from a connection map.
+    #
+    # This is a destructive operation that will tranform outputs specified as
+    # `device as output` to simply `output` and return a Hash of the structure
+    # `{ output: device }`.
+    def self.extract_mods!(map)
+        mods = HashWithIndifferentAccess.new
+
+        map.transform_keys! do |key|
+            mod, node = key.to_s.split ' as '
+            node ||= mod
+            mods[node] = mod.to_sym
+            node
+        end
+
+        mods
+    end
+
+    # Build a signal map from a nested hash of input connectivity. The input
+    # map should be of the structure
+    #
     #     { device: { input_name: source } }
     #   or
     #     { device: [source] }
     #
-    # When inputs are specified as an array, 1-based indicies will be used.
+    # When inputs are specified as an array, 1-based indices will be used.
     #
-    # Sources which exist on matrix switchers are defined as "device__output".
+    # Sources that refer to the output of a matrix switcher are defined as
+    # "device__output" (using two underscores to seperate the output
+    # name/number and device).
     #
     # For example, a map containing two displays and 2 laptop inputs, all
     # connected via 2x2 matrix switcher would be:
@@ -477,17 +514,25 @@ class Aca::Router::SignalGraph
     #         Display_2: {
     #             hdmi: :Switcher_1__2
     #         },
-    #         Switcher_1: [:Laptop_1, :Laptop_2]
+    #         Switcher_1: [:Laptop_1, :Laptop_2],
     #     }
     #
+    # Device keys should relate to module id's for control. These may also be
+    # aliased by defining them as as "mod as device". This can be used to
+    # provide better readability (e.g. "Display_1 as Left_LCD") or to segment
+    # them so that only specific routes are allowed. This approach enables
+    # devices such as centralised matrix switchers split into multiple virtual
+    # switchers that only have access to a subset of the inputs.
     def self.from_map(map)
         graph = new
 
         matrix_nodes = []
 
-        to_hash = proc { |x| x.is_a?(Array) ? Hash[(1..x.size).zip x] : x }
+        connections = normalise map
 
-        map.transform_values!(&to_hash).each_pair do |device, inputs|
+        mods = extract_mods! connections
+
+        connections.each_pair do |device, inputs|
             # Create the node for the signal sink
             graph << device
 
@@ -495,24 +540,24 @@ class Aca::Router::SignalGraph
                 # Create a node and edge to each input source
                 graph << source
                 graph.join(device, source) do |edge|
-                    edge.device = device
-                    edge.input = input
+                    edge.device = mods[device]
+                    edge.input  = input
                 end
 
                 # Check is the input is a matrix switcher or multi-output
                 # device (such as a USB switch).
-                upstream_device, output = source.split '__'
+                upstream_device, output = source.to_s.split '__'
                 next if output.nil?
 
                 matrix_nodes |= [upstream_device]
 
                 # Push in nodes and edges to each matrix input
-                matrix_inputs = map[upstream_device]
+                matrix_inputs = connections[upstream_device]
                 matrix_inputs.each_pair do |matrix_input, upstream_source|
                     graph << upstream_source
                     graph.join(source, upstream_source) do |edge|
-                        edge.device = upstream_device
-                        edge.input = matrix_input
+                        edge.device = mods[upstream_device]
+                        edge.input  = matrix_input
                         edge.output = output
                     end
                 end
@@ -521,8 +566,8 @@ class Aca::Router::SignalGraph
 
         # Remove any temp 'matrix device nodes' as we now how fully connected
         # nodes for each input and output.
-        matrix_nodes.reduce(graph) do |g, node|
-            g.delete node, check_incoming_edges: false
-        end
+        matrix_nodes.each { |id| graph.delete id, check_incoming_edges: false }
+
+        graph
     end
 end
