@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module TvOne; end
 
 # Documentation: https://aca.im/driver_docs/TV%20One/CORIOmaster-Commands-v1.7.0.pdf
@@ -46,7 +48,7 @@ class TvOne::CorioMaster
     def switch(signal_map)
         interactions = signal_map.flat_map do |slot, windows|
             Array(windows).map do |id|
-                id = id[/\d+/].to_i if id.is_a? String
+                id = id.to_s[/\d+/].to_i unless id.is_a? Integer
                 window id, 'Input', slot
             end
         end
