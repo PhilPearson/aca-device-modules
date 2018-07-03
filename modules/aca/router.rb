@@ -31,7 +31,11 @@ class Aca::Router
     end
 
     def on_update
-        load_from_map setting(:connections)
+        connections = setting :connections
+
+        logger.warn 'no connections defined' unless connections
+
+        load_from_map(connections || {})
     end
 
 
@@ -230,7 +234,7 @@ class Aca::Router
         mod = system[edge.device]
 
         fail_with = proc do |reason|
-            logger.warn "#{edge.device} #{reason} - can not switch #{edge}"
+            logger.warn "mod #{edge.device} #{reason} - can not switch #{edge}"
             return false
         end
 
