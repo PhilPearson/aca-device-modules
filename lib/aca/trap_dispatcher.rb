@@ -64,9 +64,9 @@ class Aca::SnmpManager
 
         # Extract the PDU payload
         if version == 3
-            security = settings(community)
+            security = settings[community]
             if security
-                request_pdu, engine_id, engine_boots, engine_time = ::NETSNMP::Message.decode(data, security_parameters: security)
+                request_pdu, _engine_id, _engine_boots, _engine_time = ::NETSNMP::Message.decode(data, security_parameters: security)
             else
                 logger.warn "no security defined for SNMPv3 messages to #{community.inspect}"
                 return
@@ -140,7 +140,7 @@ class Aca::TrapDispatcher
 
     def configure_server
         @server = @reactor.udp { |data, ip, port|
-            new_message(data, ip, port)
+            @manager.new_message(data, ip, port)
         }.bind('0.0.0.0', 162).start_read
 
         @manager.send_cb do |ip, port, response|

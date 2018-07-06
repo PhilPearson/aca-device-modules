@@ -2,6 +2,7 @@
 # encoding: ASCII-8BIT
 
 require 'set'
+require 'ipaddr'
 require 'protocols/snmp'
 require 'aca/trap_dispatcher'
 
@@ -23,7 +24,6 @@ class Cisco::Switch::SnoopingCatalystSNMP
     default_settings({
         building: 'building_code',
         reserve_time: 5.minutes.to_i,
-
         snmp_options: {
             version: 1,
             community: 'public'
@@ -100,6 +100,8 @@ class Cisco::Switch::SnoopingCatalystSNMP
         td = ::Aca::TrapDispatcher.instance
         td.ignore(@resolved_ip) if @resolved_ip
         @resolved_ip = ip
+
+        logger.debug { "Registering for trap notifications from #{ip}" }
         td.register(thread, logger, ip) { |pdu| check_link_state(pdu) }
     end
 
@@ -134,13 +136,18 @@ class Cisco::Switch::SnoopingCatalystSNMP
     # The SNMP trap handler will notify of changes in interface state
     def on_trap(ifIndex, state)
         interface = @if_mappings[ifIndex]
+        if interface.nil?
+            logger.debug { "Notify: no interface found for #{ifIndex} - #{state}" }
+            return
+        end
+
         case state
         when :up
-            logger.debug { "Interface Up: #{interface}" }
+            logger.debug { "Notify Up: #{interface}" }
             remove_reserved(interface)
             @check_interface << interface
         when :down
-            logger.debug { "Interface Down: #{interface}" }
+            logger.debug { "Notify Down: #{interface}" }
             remove_lookup(interface)
         end
 
@@ -191,12 +198,14 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
         def ip
             case self.address_type
-            when :ipv4, :ipv4z
+            when :ipv4
+                # DISPLAY-HINT "1d.1d.1d.1d"
                 # Example response: "0A B2 C4 45"
                 self.ip_address.split(' ').map { |i| i.to_i(16).to_s }.join('.')
-            else
-                # TODO:: IPv6
-                nil
+            when :ipv6
+                # DISPLAY-HINT "2x:2x:2x:2x:2x:2x:2x:2x"
+                # IPAddr will present the IPv6 address in it's short form
+                IPAddr.new(self.ip_address.gsub(' ', '').scan(/..../).join(':')).to_s
             end
         end
     end
@@ -208,11 +217,11 @@ class Cisco::Switch::SnoopingCatalystSNMP
         return @processing if check_processing(:query_snooping_bindings)
         @processing = :query_snooping_bindings
 
-        logger.debug "extracting snooping table"
+        logger.debug 'extracting snooping table'
 
         # Walking cdsBindingsTable
         entries = {}
-        @client.walk(oid: "1.3.6.1.4.1.9.9.380.1.4.1").each do |oid_code, value|
+        @client.walk(oid: '1.3.6.1.4.1.9.9.380.1.4.1').each do |oid_code, value|
             part, entry_id = oid_code[28..-1].split('.', 2)
             next if entry_id.nil?
 
@@ -238,7 +247,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
             mac = entry.mac
             ip = entry.ip
-            next if !::IPAddress.valid?(ip)
+            next unless ::IPAddress.valid?(ip)
 
             # NOTE:: Same as snooping_catalyst.rb
             iface = self[interface] || ::Aca::Tracking::StaticDetails.new
@@ -248,7 +257,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
                 # NOTE:: Same as username found
                 details = ::Aca::Tracking::SwitchPort.find_by_id("swport-#{remote_address}-#{interface}") || ::Aca::Tracking::SwitchPort.new
-                reserved = details.connected(mac, @reserve_time, {
+                details.connected(mac, @reserve_time, {
                     device_ip: ip,
                     switch_ip: remote_address,
                     hostname: @hostname,
@@ -266,7 +275,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
                     # NOTE:: Same as new connection
                     details = ::Aca::Tracking::SwitchPort.find_by_id("swport-#{remote_address}-#{interface}") || ::Aca::Tracking::SwitchPort.new
-                    reserved = details.connected(mac, @reserve_time, {
+                    details.connected(mac, @reserve_time, {
                         device_ip: ip,
                         switch_ip: remote_address,
                         hostname: @hostname,
@@ -278,7 +287,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
                     self[interface] = details.details
                 end
 
-            elsif not iface.reserved
+            elsif !iface.reserved
                 # We don't know the user who is at this desk...
                 details = ::Aca::Tracking::SwitchPort.find_by_id("swport-#{remote_address}-#{interface}")
                 reserved = details.check_for_user(@reserve_time)
@@ -287,8 +296,8 @@ class Cisco::Switch::SnoopingCatalystSNMP
             elsif iface.clash
                 # There was a reservation clash - is there still a clash?
                 details = ::Aca::Tracking::SwitchPort.find_by_id("swport-#{remote_address}-#{interface}")
-                reserved = details.check_for_user(@reserve_time)
-                self[interface] = details.details if !details.clash?
+                details.check_for_user(@reserve_time)
+                self[interface] = details.details unless details.clash?
             end
         end
     ensure
@@ -301,10 +310,10 @@ class Cisco::Switch::SnoopingCatalystSNMP
         return @processing if check_processing(:query_index_mappings)
         @processing = :query_index_mappings
 
-        logger.debug "mapping ifIndex to port names"
+        logger.debug 'mapping ifIndex to port names'
 
         mappings = {}
-        @client.walk(oid: "1.3.6.1.2.1.31.1.1.1.1").each do |oid_code, value|
+        @client.walk(oid: '1.3.6.1.2.1.31.1.1.1.1').each do |oid_code, value|
             oid_code = oid_code[23..-1]
             mappings[oid_code.to_i] = value.downcase
         end
@@ -321,9 +330,9 @@ class Cisco::Switch::SnoopingCatalystSNMP
         return @processing if check_processing(:query_interface_status)
         @processing = :query_interface_status
 
-        logger.debug "querying interface status"
+        logger.debug 'querying interface status'
 
-        @client.walk(oid: "1.3.6.1.2.1.2.2.1.8").each do |oid_code, value|
+        @client.walk(oid: '1.3.6.1.2.1.2.2.1.8').each do |oid_code, value|
             oid_code = oid_code[20..-1]
             interface = @if_mappings[oid_code.to_i]
 
@@ -350,7 +359,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
     end
 
     def query_connected_devices
-        logger.debug "Querying for connected devices"
+        logger.debug 'Querying for connected devices'
         query_index_mappings if @if_mappings.empty?
         query_interface_status
         query_snooping_bindings
@@ -383,7 +392,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
                 @processing = nil
 
                 # Perform the next request
-                self.__send__(@process_queue.shift)
+                __send__(@process_queue.shift)
             end
         end
         nil
@@ -437,9 +446,9 @@ class Cisco::Switch::SnoopingCatalystSNMP
         end
 
         # Remove them from the reserved list if not
-        if remove.present?
-            @reserved_interface -= remove
-            self[:reserved] = @reserved_interface.to_a
-        end
+        return unless remove.present?
+
+        @reserved_interface -= remove
+        self[:reserved] = @reserved_interface.to_a
     end
 end
