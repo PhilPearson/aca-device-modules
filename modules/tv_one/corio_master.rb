@@ -57,8 +57,9 @@ class TvOne::CorioMaster
 
     def window(id, property, value)
         set("Window#{id}.#{property}", value).then do
-            self[:windows][:"window#{id}"][property.downcase.to_sym] = value
-            signal_status :windows
+            self[:windows] = (self[:windows] || {}).deep_merge(
+                :"window#{id}" => { property.downcase.to_sym => value }
+            )
         end
     end
 
@@ -81,7 +82,8 @@ class TvOne::CorioMaster
     # Get the presets available for recall - for some inexplicible reason this
     # has a wildly different API to the rest of the system state...
     def query_preset_list(expose_as: nil)
-        exec('Preset.PresetList').then do |presets|
+        exec('Routing.Preset.PresetList').then do |presets|
+
             presets.transform_keys { |key| key[/\d+/].to_i }
                    .transform_values do |val|
                        name, canvas, time = val.split ','
@@ -92,7 +94,7 @@ class TvOne::CorioMaster
                        }
                    end
 
-            self[expose_as] = presets unless expose_as.nil?
+            self[expose_as.to_sym] = presets unless expose_as.nil?
 
             presets
         end
@@ -189,7 +191,7 @@ class TvOne::CorioMaster
         if updates.size == 1 && updates.include?(command)
             # Single property query
             updates.values.first
-        elsif updates.values.all?(&:nil?)
+        elsif !updates.empty? && updates.values.all?(&:nil?)
             # Property list
             updates.keys
         else
@@ -231,6 +233,7 @@ class TvOne::CorioMaster
             end
         when 'Info'
             logger.info message
+            yield message if block_given?
             :success
         when 'Error'
             logger.error message

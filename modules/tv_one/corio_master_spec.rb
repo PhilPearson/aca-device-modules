@@ -10,6 +10,10 @@ Orchestrator::Testing.mock_device 'TvOne::CorioMaster',
             Preset.Take = 1\r
             !Done Preset.Take\r
         RX
+        should_send "Routing.Preset.PresetList()\r\n"
+        responds <<~RX
+            !Done Routing.Preset.PresetList()\r
+        RX
         should_send "Windows\r\n"
         responds <<~RX
             !Done Windows\r
@@ -58,7 +62,7 @@ Orchestrator::Testing.mock_device 'TvOne::CorioMaster',
         .responds <<~RX
             !Info: Rebooting...\r
         RX
-    expect(result).to be(:success)
+    expect(result).to eq('Rebooting...')
 
     exec(:set, 'Window1.Input', 'Slot3.In1')
         .should_send("Window1.Input = Slot3.In1\r\n")
@@ -158,5 +162,6 @@ Orchestrator::Testing.mock_device 'TvOne::CorioMaster',
             RX
         )
     wait_tick
-    sync_state
+    expect(status[:windows][:window1][:input]).to eq('Slot1.In1')
+    expect(status[:windows][:window2][:input]).to eq('Slot1.In2')
 end
