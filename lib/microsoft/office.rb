@@ -47,13 +47,13 @@ class Microsoft::Office
     end 
 
     def graph_token
-       @graph_token ||= @graph_client.client_credentials.get_token({
+       @graph_token = @graph_client.client_credentials.get_token({
             :scope => @app_scope
         }).token
     end
 
     def password_graph_token
-        @graph_token ||= @graph_client.password.get_token(
+        @graph_token = @graph_client.password.get_token(
         @service_account_email,
         @service_account_password,
         {
@@ -181,7 +181,7 @@ class Microsoft::Office
         room_response.select! { |room| room['email'] == room_id }
     end
 
-    def get_available_rooms(room_ids:, start_param:, end_param:, attendees:[])
+    def get_available_rooms(rooms:, start_param:, end_param:)
         endpoint = "/v1.0/users/#{@service_account_email}/findMeetingTimes" 
         now = Time.now
         start_ruby_param = ensure_ruby_date((start_param || now))
@@ -191,24 +191,13 @@ class Microsoft::Office
         end_param = (end_ruby_param + 30.minutes).utc.iso8601.split("+")[0]
 
         # Add the attendees
-        attendees.map!{|a|
+        rooms.map!{|room|
             { 
                 type: 'required',
                 emailAddress: {
-                    address: a[:email],
-                    name: a[:name]
+                    address: room[:email],
+                    name: room[:name]
             }   }
-        }
-
-        location_constraint = {
-            isRequired: true,
-            locations: room_ids.map{ |email| 
-                {
-                    locationEmailAddress: email, 
-                    resolveAvailability: true
-                }
-            },
-            suggestLocation: false
         }
 
         time_constraint = {
@@ -226,8 +215,7 @@ class Microsoft::Office
         }
 
         post_data = {
-            attendees: attendees,
-            locationConstraint: location_constraint,
+            attendees: rooms,
             timeConstraint: time_constraint,
             maxCandidates: 1000,
             returnSuggestionReasons: true,
@@ -338,12 +326,14 @@ class Microsoft::Office
         })
 
         # Add the current user as an attendee
-        attendees.push({
-            emailAddress: {
-                address: current_user[:email],
-                name: current_user[:name]
-            }
-        })
+        if current_user
+            attendees.push({
+                emailAddress: {
+                    address: current_user[:email],
+                    name: current_user[:name]
+                }
+            })
+        end
 
         # Create our event which will eventually be stringified
         event = {
@@ -365,15 +355,25 @@ class Microsoft::Office
                 locationEmailAddress: room.email
             },
             isOrganizer: false,
-            organizer: {
+            attendees: attendees
+        }
+
+        if current_user
+            event[:organizer] = {
                 emailAddress: {
                     address: current_user.email,
                     name: current_user.name
                 }
-            },
-            attendees: attendees
-        }
-
+            }
+        else
+            event[:organizer] = {
+                emailAddress: {
+                    address: room.email,
+                    name: room.name
+                }
+            }
+        end
+        
         if recurrence
             event[:recurrence] = {
                 pattern: {

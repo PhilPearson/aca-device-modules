@@ -12,6 +12,7 @@ class Microsoft::Exchange
             service_account_email:,
             service_account_password:,
             internet_proxy:nil,
+            hide_all_day_bookings:false,
             logger: Rails.logger
         )
         begin
@@ -24,10 +25,11 @@ class Microsoft::Exchange
         @service_account_email = service_account_email
         @service_account_password = service_account_password
         @internet_proxy = internet_proxy
+        @hide_all_day_bookings = hide_all_day_bookings
         ews_opts = { http_opts: { ssl_verify_mode: 0 } }
         ews_opts[:http_opts][:http_client] = @internet_proxy if @internet_proxy
         STDERR.puts '--------------- NEW CLIENT CREATED --------------'
-        STDERR.puts "At URL: #{@ews_url} with email: #{@service_account_email} and password #{@service_account_password}"
+        STDERR.puts "At URL: #{@ews_url} with email: #{@service_account_email}"
         STDERR.puts '-------------------------------------------------'
         @ews_client ||= Viewpoint::EWSClient.new @ews_url, @service_account_email, @service_account_password, ews_opts
     end 
@@ -139,51 +141,55 @@ class Microsoft::Exchange
         STDERR.puts "Getting available rooms with"
         STDERR.puts start_time
         STDERR.puts end_time
-        STDERR.flush 
+        STDERR.flush
 
-        # Get booking data for all rooms between time range bounds
-        user_free_busy = @ews_client.get_user_availability(rooms,
-            start_time: start_time,
-            end_time:   end_time,
-            requested_view: :detailed,
-            time_zone: {
-                bias: -600,
-                standard_time: {
-                    bias: -60,
-                    time: "03:00:00",
-                    day_order: 1,
-                    month: 10,
-                    day_of_week: 'Sunday'
-                },
-                daylight_time: {
-                    bias: 0,
-                    time: "02:00:00",
-                    day_order: 1,
-                    month: 4,
-                    day_of_week: 'Sunday'
+        rooms.each_slice(99).each do |room_subset|
+
+            # Get booking data for all rooms between time range bounds
+            user_free_busy = @ews_client.get_user_availability(room_subset,
+                start_time: start_time,
+                end_time:   end_time,
+                requested_view: :detailed,
+                time_zone: {
+                    bias: -600,
+                    standard_time: {
+                        bias: -60,
+                        time: "03:00:00",
+                        day_order: 1,
+                        month: 10,
+                        day_of_week: 'Sunday'
+                    },
+                    daylight_time: {
+                        bias: 0,
+                        time: "02:00:00",
+                        day_order: 1,
+                        month: 4,
+                        day_of_week: 'Sunday'
+                    }
                 }
-            }
-        )
+            )
 
-       user_free_busy.body[0][:get_user_availability_response][:elems][0][:free_busy_response_array][:elems].each_with_index {|r,index|
-            # Remove meta data (business hours and response type)
-            resp = r[:free_busy_response][:elems][1][:free_busy_view][:elems].delete_if { |item| item[:free_busy_view_type] || item[:working_hours] }
+           user_free_busy.body[0][:get_user_availability_response][:elems][0][:free_busy_response_array][:elems].each_with_index {|r,index|
+                # Remove meta data (business hours and response type)
+                resp = r[:free_busy_response][:elems][1][:free_busy_view][:elems].delete_if { |item| item[:free_busy_view_type] || item[:working_hours] }
 
-            # Back to back meetings still show up so we need to remove these from the results
-            if resp.length == 1
-                resp = resp[0][:calendar_event_array][:elems]
+                # Back to back meetings still show up so we need to remove these from the results
+                if resp.length == 1
+                    resp = resp[0][:calendar_event_array][:elems]
 
-                if resp.length == 0
-                    free_rooms.push(rooms[index])
-                elsif resp.length == 1
-                    free_rooms.push(rooms[index]) if find_time(resp[0], :start_time) == end_time
-                    free_rooms.push(rooms[index]) if find_time(resp[0], :end_time) == start_time
+                    if resp.length == 0
+                        free_rooms.push(room_subset[index])
+                    elsif resp.length == 1
+                        free_rooms.push(room_subset[index]) if find_time(resp[0], :start_time) == end_time
+                        free_rooms.push(room_subset[index]) if find_time(resp[0], :end_time) == start_time
+                    end
+                elsif resp.length == 0
+                    # If response length is 0 then the room is free
+                    free_rooms.push(room_subset[index])
                 end
-            elsif resp.length == 0
-                # If response length is 0 then the room is free
-                free_rooms.push(rooms[index])
-            end
-        }
+            }
+        end
+
         free_rooms
     end
 
@@ -225,6 +231,11 @@ class Microsoft::Exchange
                     email: attendee.email
                 }
             } if event.required_attendees
+            if @hide_all_day_bookings
+                STDERR.puts "SKIPPING #{event.subject}"
+                STDERR.flush
+                next if event.end.to_time - event.start.to_time > 86399
+            end
             bookings.push(booking)
         }
         bookings
@@ -235,7 +246,7 @@ class Microsoft::Exchange
 	end
     end
 
-    def create_booking(room_email:, start_param:, end_param:, subject:, description:nil, current_user:, attendees: nil, timezone:'Sydney', use_act_as: false)
+    def create_booking(room_email:, start_param:, end_param:, subject:, description:nil, current_user:, attendees: nil, timezone:'Sydney', permission: 'impersonation')
         STDERR.puts "CREATING NEW BOOKING IN LIBRARY"
         STDERR.puts "room_email is #{room_email}"
         STDERR.puts "start_param is #{start_param}"
@@ -251,9 +262,12 @@ class Microsoft::Exchange
 
 
         booking = {}
+
+        # Allow for naming of subject or title
         booking[:subject] = subject
         booking[:title] = subject
-        # booking[:location] = room_email
+
+        # Set the room email as a resource
         booking[:resources] = [{
             attendee: {
                 mailbox: {
@@ -261,13 +275,21 @@ class Microsoft::Exchange
                 }
             }
         }]
+
+        # Add start and end times
         booking[:start] = Time.at(start_param.to_i / 1000).utc.iso8601.chop
-        # booking[:body] = description
         booking[:end] = Time.at(end_param.to_i / 1000).utc.iso8601.chop
+
+        # Add the current user passed in as an attendee
+        mailbox = { email_address: current_user[:email] }
+        mailbox[:name] = current_user[:name] if current_user.key?('name')
         booking[:required_attendees] = [{
-            attendee: { mailbox: { email_address: current_user.email } }
+            attendee: { mailbox:  mailbox }
         }]
+
+        # Add the attendees 
         attendees.each do |attendee|
+        # If we don't have an array of emails then it's an object in the form {email: "a@b.com", name: "Blahman Blahson"}
             if attendee.class != String
                 attendee = attendee['email']
             end
@@ -275,61 +297,35 @@ class Microsoft::Exchange
                 attendee: { mailbox: { email_address: attendee}}
             })
         end
-        booking[:required_attendees].push({
-                attendee: { mailbox: { email_address: room_email}}
-            })
+
+        # Add the room as an attendee (it seems as if some clients require this and others don't)
+        booking[:required_attendees].push({ attendee: { mailbox: { email_address: room_email}}})
         booking[:body] = description
+
+        # A little debugging
         STDERR.puts "MAKING REQUEST WITH"
         STDERR.puts booking
         STDERR.flush
-        if use_act_as
+
+        # Determine whether to use delegation, impersonation or neither
+        if permission == 'delegation'
             folder = @ews_client.get_folder(:calendar, { act_as: room_email })
-        else
-            @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], current_user.email)
+        elsif permission == 'impersonation'
+            @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], current_user[:email])
+            folder = @ews_client.get_folder(:calendar)
+        elsif permission == 'none' || !permission
             folder = @ews_client.get_folder(:calendar)
         end
+
+        # Create the booking and return data relating to it
         appointment = folder.create_item(booking)
         {
             id: appointment.id,
             start: start_param,
             end: end_param,
             attendees: attendees,
-            # location: Orchestrator::ControlSystem.find_by_email(room_email).name,
             subject: subject
         }
-    end
-
-    def update_booking(booking_id:, room_id:, start_param:nil, end_param:nil, subject:nil, description:nil, attendees:nil, timezone:'Sydney')
-        # We will always need a room and endpoint passed in
-        room = Orchestrator::ControlSystem.find(room_id)
-        endpoint = "/v1.0/users/#{room.email}/events/#{booking_id}"
-        event = {}
-        event[:subject] = subject if subject
-
-        event[:start] = {
-            dateTime: start_param,
-            timeZone: TIMEZONE_MAPPING[timezone.to_sym]
-        } if start_param
-
-        event[:end] = {
-            dateTime: end_param,
-            timeZone: TIMEZONE_MAPPING[timezone.to_sym]
-        } if end_param
-
-        event[:body] = {
-            contentType: 'html',
-            content: description
-        } if description
-
-        # Let's assume that the request has the current user and room as an attendee already
-        event[:attendees] = attendees.map{|a|
-            { emailAddress: {
-                    address: a[:email],
-                    name: a[:name]
-            }   }
-        } if attendees
-
-        response = JSON.parse(graph_request('patch', endpoint, event).to_json.value.body)['value']
     end
 
     # Takes a date of any kind (epoch, string, time object) and returns a time object
