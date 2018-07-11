@@ -161,9 +161,9 @@ class Aca::Router
         @signal_graph = SignalGraph.from_map(connections).freeze
 
         # TODO: track active signal source at each node and expose as a hash
-        self[:nodes] = signal_graph.map(&:id)
-        self[:inputs] = signal_graph.sinks.map(&:id)
-        self[:outputs] = signal_graph.sources.map(&:id)
+        self[:nodes] = signal_graph.node_ids
+        self[:inputs] = signal_graph.sinks
+        self[:outputs] = signal_graph.sources
     end
 
     # Find the shortest path between between two nodes and return a list of the
@@ -224,7 +224,7 @@ class Aca::Router
 
                     source_nodes |= nodes
                     edge_map[source][sink] = edges
-                rescue e
+                rescue => e
                     # note `route` may also throw an exception (e.g. when there
                     # is an invalid source / sink or unroutable path)
                     raise if atomic
@@ -456,16 +456,20 @@ class Aca::Router::SignalGraph
         nodes.key? id
     end
 
+    def node_ids
+        map(&:id)
+    end
+
     def successors(id)
         nodes[id].edges.keys
     end
 
     def sources
-        select { |node| indegree(node.id).zero? }
+        node_ids.select { |id| indegree(id).zero? }
     end
 
     def sinks
-        select { |node| outdegree(node.id).zero? }
+        node_ids.select { |id| outdegree(id).zero? }
     end
 
     def incoming_edges(id)
