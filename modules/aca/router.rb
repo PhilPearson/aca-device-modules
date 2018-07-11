@@ -45,9 +45,9 @@ class Aca::Router
     # Route a set of signals to arbitrary destinations.
     #
     # `signal_map`  is a hash of the structure `{ source: sink | [sinks] }`
-    # 'atomic'      may be used to throw an exception, prior to any device
-    #               interaction taking place if any of the routes are not
-    #               possible
+    # 'atomic'      may be used to prevent activation of any part of the signal
+    #               map, prior to any device interaction taking place, if any
+    #               of the routes are not possible
     # `force`       control if switch events should be forced, even when the
     #               associated device module is already reporting it's on the
     #               correct input
@@ -56,34 +56,29 @@ class Aca::Router
     # single source to a single destination, Ruby's implicit hash syntax can be
     # used to let you express it neatly as `connect source => sink`.
     def connect(signal_map, atomic: false, force: false)
-        edges = map_to_edges signal_map, strict: atomic
+        # Convert the signal map to a nested hash of routes
+        # { source => { dest => [edges] } }
+        edge_map = build_edge_map signal_map, atomic: atomic
 
-        edge_list = edges.values.reduce(&:|)
+        # Reduce the edge map to a set of edges
+        edges_to_connect = edge_map.reduce(Set.new) do |s, (_, routes)|
+            s | routes.values.reduce(&:|)
+        end
 
-        edge_list.select! { |e| needs_activation? e, ignore_status: force }
+        switch = activate_all edges_to_connect, atomic: atomic, force: force
 
-        edge_list, unroutable = edge_list.partition { |e| can_activate? e }
-        raise 'can not perform all routes' if unroutable.any? && atomic
+        switch.then do |success, failed|
+            if failed.empty?
+                logger.debug 'signal map fully activated'
+                edge_map.transform_values(&:keys)
 
-        interactions = edge_list.map { |e| activate e }
+            elsif success.empty?
+                thread.reject 'failed to activate, devices untouched'
 
-        thread.finally(interactions).then do |results|
-            failed = edge_list.zip(results).reject { |_, (_, success)| success }
-
-            edges_with_errors = unroutable
-            failed.each do |edge, (error, _)|
-                logger.warn "could not switch #{edge}: #{error}"
-                edges_with_errors << edge
-            end
-
-            if edges_with_errors.empty?
-                logger.debug 'all routes activated successfully'
-                signal_map
-            elsif atomic
-                thread.reject 'failed to activate all routes'
             else
-                signal_map.select do |source, _|
-                    (edges[source] & edges_with_errors).empty?
+                logger.warn 'signal map partially activated'
+                edge_map.transform_values do |routes|
+                    routes.select { |_, edges| success.superset? edges }.keys
                 end
             end
         end
@@ -97,8 +92,15 @@ class Aca::Router
     # it. Similarly `on` maybe used to look up the input used by any other node
     # within the graph that would be used to show `source`.
     def input_for(source, on: nil)
-        sink = on || upstream(source)
-        _, edges = route source, sink
+        if on.nil?
+            edges = signal_graph.incoming_edges source
+            raise "no outputs from #{source}" if edges.empty?
+            raise "multiple outputs from #{source}, please specify a sink" \
+                unless edges.map(&:device).uniq.size == 1
+        else
+            _, edges = route source, on
+        end
+
         edges.last.input
     end
 
@@ -147,7 +149,7 @@ class Aca::Router
     end
 
     def paths
-        @path_cache ||= HashWithIndifferentAccess.new do |hash, node|
+        @path_cache ||= Hash.new do |hash, node|
             hash[node] = signal_graph.dijkstra node
         end
     end
@@ -178,12 +180,12 @@ class Aca::Router
 
         nodes = []
         edges = []
-        node = signal_graph[source]
+        node = source
         until node.nil?
             nodes.unshift node
-            predecessor = path.predecessor[node.id]
-            edges << predecessor.edges[node.id] unless predecessor.nil?
-            node = predecessor
+            prev = path.predecessor[node]
+            edges << signal_graph[prev].edges[node] unless prev.nil?
+            node = prev
         end
 
         logger.debug { edges.map(&:to_s).join ' then ' }
@@ -191,57 +193,88 @@ class Aca::Router
         [nodes, edges]
     end
 
-    # Find the optimum combined paths required to route a single source to
-    # multiple sink devices.
-    def route_many(source, sinks, strict: false)
-        node_exists = proc do |id|
-            signal_graph.include?(id).tap do |exists|
-                unless exists
-                    message = "#{id} does not exist"
-                    raise ArgumentError, message if strict
-                    logger.warn message
-                end
-            end
-        end
-
-        nodes = Set.new
-        edges = Set.new
-
-        if node_exists[source]
-            Array(sinks).select(&node_exists).each do |sink|
-                n, e = route source, sink
-                nodes |= n
-                edges |= e
-            end
-        end
-
-        [nodes, edges]
-    end
-
-    # Given a signal map, convert it to a hash still keyed on source id's, but
-    # containing the edges within the graph to be utilised.
-    def map_to_edges(signal_map, strict: false)
-        nodes = {}
-        edges = {}
+    # Convert a signal map of the structure
+    #
+    #     source => [dest]
+    #
+    # to a nested hash of the structure
+    #
+    #     source => { dest => [edges] }
+    #
+    def build_edge_map(signal_map, atomic: false)
+        nodes_in_use = Set.new
+        edge_map = {}
 
         signal_map.each_pair do |source, sinks|
-            n, e = route_many source, sinks, strict: strict
-            nodes[source] = n
-            edges[source] = e
+            source = source.to_sym
+            sinks = Array(sinks).map(&:to_sym)
+
+            source_nodes = Set.new
+            edge_map[source] = {}
+
+            sinks.each do |sink|
+                begin
+                    nodes, edges = route source, sink
+
+                    if nodes_in_use.intersect? Set[nodes]
+                        partial_map = edge_map.transform_values(&:keys)
+                        route = "route from #{source} to #{sink}"
+                        raise "#{route} conflicts with routes in #{partial_map}"
+                    end
+
+                    source_nodes |= nodes
+                    edge_map[source][sink] = edges
+                rescue e
+                    # note `route` may also throw an exception (e.g. when there
+                    # is an invalid source / sink or unroutable path)
+                    raise if atomic
+                    logger.warn e.message
+                end
+            end
+
+            nodes_in_use |= source_nodes
         end
 
-        conflicts = nodes.size > 1 ? nodes.values.reduce(&:&) : Set.new
-        unless conflicts.empty?
-            sources = nodes.reject { |(_, n)| (n & conflicts).empty? }.keys
-            message = "routes for #{sources.join ', '} intersect"
-            raise message if strict
-            logger.warn message
-        end
-
-        edges
+        edge_map
     end
 
-    def needs_activation?(edge, ignore_status: false)
+    # Given a set of edges, activate them all and return a promise that will
+    # resolve following the completion of all device interactions.
+    #
+    # The returned promise contains the original edges, partitioned into
+    # success and failure sets.
+    def activate_all(edges, atomic: false, force: false)
+        success = Set.new
+        failed = Set.new
+
+        # Filter out any edges we can skip over
+        skippable = edges.reject { |e| needs_activation? e, force: force }
+        success  |= skippable
+        edges    -= skippable
+
+        # Remove anything that we know will fail up front
+        unroutable = edges.reject { |e| can_activate? e }
+        failed    |= unroutable
+        edges     -= unroutable
+
+        raise 'can not perform all routes' if atomic && unroutable.any?
+
+        interactions = edges.map { |e| activate e }
+
+        thread.finally(interactions).then do |results|
+            edges.zip(results).each do |edge, (result, resolved)|
+                if resolved
+                    success |= edge
+                else
+                    logger.warn "failed to switch #{edge}: #{result}"
+                    failed |= edge
+                end
+            end
+            [success, failed]
+        end
+    end
+
+    def needs_activation?(edge, force: false)
         mod = system[edge.device]
 
         fail_with = proc do |reason|
@@ -255,7 +288,7 @@ class Aca::Router
             if mod.nil? && single_source
 
         fail_with['already on correct input'] \
-            if edge.nx1? && mod[:input] == edge.input && !ignore_status
+            if edge.nx1? && mod[:input] == edge.input && !force
 
         fail_with['has an incompatible api, but only a single input defined'] \
             if edge.nx1? && !mod.respond_to?(:switch_to) && single_source
@@ -316,8 +349,8 @@ class Aca::Router::SignalGraph
         Meta = Struct.new(:device, :input, :output)
 
         def initialize(source, target, &blk)
-            @source = source
-            @target = target
+            @source = source.to_sym
+            @target = target.to_sym
 
             meta = Meta.new.tap(&blk)
             normalise_io = lambda do |x|
@@ -352,13 +385,13 @@ class Aca::Router::SignalGraph
 
         def initialize(id)
             @id = id.to_sym
-            @edges = HashWithIndifferentAccess.new do |_, other_id|
+            @edges = Hash.new do |_, other_id|
                 raise ArgumentError, "No edge from \"#{id}\" to \"#{other_id}\""
             end
         end
 
         def join(other_id, datum)
-            edges[other_id] = datum
+            edges[other_id.to_sym] = datum
             self
         end
 
@@ -380,7 +413,7 @@ class Aca::Router::SignalGraph
     attr_reader :nodes
 
     def initialize
-        @nodes = HashWithIndifferentAccess.new do |_, id|
+        @nodes = Hash.new do |_, id|
             raise ArgumentError, "\"#{id}\" does not exist"
         end
     end
@@ -390,7 +423,8 @@ class Aca::Router::SignalGraph
     end
 
     def insert(id)
-        nodes[id] = Node.new id unless nodes.key? id
+        id = id.to_sym
+        nodes[id] = Node.new id unless nodes.include? id
         self
     end
 
@@ -407,6 +441,8 @@ class Aca::Router::SignalGraph
     end
 
     def join(source, target, &block)
+        source = source.to_sym
+        target = target.to_sym
         datum = Edge.new(source, target, &block)
         nodes[source].join target, datum
         self
@@ -421,7 +457,7 @@ class Aca::Router::SignalGraph
     end
 
     def successors(id)
-        nodes[id].edges.keys.map { |x| nodes[x] }
+        nodes[id].edges.keys
     end
 
     def sources
@@ -452,20 +488,20 @@ class Aca::Router::SignalGraph
 
     def dijkstra(id)
         active = Containers::PriorityQueue.new { |x, y| (x <=> y) == -1 }
-        distance_to = HashWithIndifferentAccess.new { 1.0 / 0.0 }
+        distance_to = Hash.new { 1.0 / 0.0 }
         predecessor = {}
 
         distance_to[id] = 0
-        active.push nodes[id], distance_to[id]
+        active.push id, distance_to[id]
 
         until active.empty?
             u = active.pop
-            successors(u.id).each do |v|
-                alt = distance_to[u.id] + 1
-                next unless alt < distance_to[v.id]
-                distance_to[v.id] = alt
-                predecessor[v.id] = u
-                active.push v, distance_to[v.id]
+            successors(u).each do |v|
+                alt = distance_to[u] + 1
+                next unless alt < distance_to[v]
+                distance_to[v] = alt
+                predecessor[v] = u
+                active.push v, distance_to[v]
             end
         end
 
@@ -492,13 +528,13 @@ class Aca::Router::SignalGraph
     #     { device: { input: source } }
     #
     def self.normalise(map)
-        map.with_indifferent_access.transform_values! do |inputs|
+        map.transform_values do |inputs|
             case inputs
             when Array
                 (1..inputs.size).zip(inputs).to_h
             when Hash
                 inputs.transform_keys do |key|
-                    key.to_s[/^\d+$/]&.to_i || key
+                    key.to_s[/^\d+$/]&.to_i || key.to_sym
                 end
             else
                 raise ArgumentError, 'inputs must be a Hash or Array'
@@ -512,12 +548,12 @@ class Aca::Router::SignalGraph
     # `device as output` to simply `output` and return a Hash of the structure
     # `{ output: device }`.
     def self.extract_mods!(map)
-        mods = HashWithIndifferentAccess.new
+        mods = {}
 
         map.transform_keys! do |key|
-            mod, node = key.to_s.split ' as '
+            mod, node = key.to_s.split(' as ').map(&:to_sym)
             node ||= mod
-            mods[node] = mod.to_sym
+            mods[node] = mod
             node
         end
 
@@ -581,6 +617,7 @@ class Aca::Router::SignalGraph
                 upstream_device, output = source.to_s.split '__'
                 next if output.nil?
 
+                upstream_device = upstream_device.to_sym
                 matrix_nodes |= [upstream_device]
 
                 # Push in nodes and edges to each matrix input

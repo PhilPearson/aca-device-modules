@@ -35,7 +35,7 @@ Orchestrator::Testing.mock_device 'Aca::Router' do
         edge.device = :Display_1
         edge.input  = :hdmi
     end
-    expect(graph.successors(:display)).to include(graph[:laptop])
+    expect(graph.successors(:display)).to include(:laptop)
 
     # Graph structural inspection
     # note: signal flow is inverted from graph directivity
@@ -83,13 +83,13 @@ Orchestrator::Testing.mock_device 'Aca::Router' do
     normalised_map = SignalGraph.normalise(signal_map)
     expect(normalised_map).to eq(
         'Display_1 as Left_LCD' => {
-            'hdmi'  => 'Switcher_1__1',
-            'hdmi2' => 'SubSwitchA__1'
+            hdmi: 'Switcher_1__1',
+            hdmi2: 'SubSwitchA__1'
         },
         'Display_2 as Right_LCD' => {
-            'hdmi'  => 'Switcher_1__2',
-            'hdmi2' => 'SubSwitchB__2',
-            'display_port' => 'g'
+            hdmi: 'Switcher_1__2',
+            hdmi2: 'SubSwitchB__2',
+            display_port: 'g'
         },
         'Switcher_1' => {
             1 => 'a',
@@ -107,31 +107,31 @@ Orchestrator::Testing.mock_device 'Aca::Router' do
 
     mods = SignalGraph.extract_mods!(normalised_map)
     expect(mods).to eq(
-        'Left_LCD'   => :Display_1,
-        'Right_LCD'  => :Display_2,
-        'Switcher_1' => :Switcher_1,
-        'SubSwitchA' => :Switcher_2,
-        'SubSwitchB' => :Switcher_2
+        Left_LCD:   :Display_1,
+        Right_LCD:  :Display_2,
+        Switcher_1: :Switcher_1,
+        SubSwitchA: :Switcher_2,
+        SubSwitchB: :Switcher_2
     )
     expect(normalised_map).to eq(
-        'Left_LCD' => {
-            'hdmi'  => 'Switcher_1__1',
-            'hdmi2' => 'SubSwitchA__1'
+        Left_LCD: {
+            hdmi: 'Switcher_1__1',
+            hdmi2: 'SubSwitchA__1'
         },
-        'Right_LCD' => {
-            'hdmi'  => 'Switcher_1__2',
-            'hdmi2' => 'SubSwitchB__2',
-            'display_port' => 'g'
+        Right_LCD: {
+            hdmi: 'Switcher_1__2',
+            hdmi2: 'SubSwitchB__2',
+            display_port: 'g'
         },
-        'Switcher_1' => {
+        Switcher_1: {
             1 => 'a',
             2 => 'b'
         },
-        'SubSwitchA' => {
+        SubSwitchA: {
             1 => 'c',
             2 => 'd'
         },
-        'SubSwitchB' => {
+        SubSwitchB: {
             3 => 'e',
             4 => 'f'
         }
@@ -155,13 +155,15 @@ Orchestrator::Testing.mock_device 'Aca::Router' do
 
 
     # -------------------------------------------------------------------------
-    section 'Routing'
 
     exec(:load_from_map, signal_map)
 
+    # -------------------------------------------------------------------------
+    section 'Routing'
+
     exec(:route, :a, :Left_LCD)
     nodes, edges = result
-    expect(nodes.map(&:id)).to contain_exactly(:a, :Switcher_1__1, :Left_LCD)
+    expect(nodes).to contain_exactly(:a, :Switcher_1__1, :Left_LCD)
     expect(edges.first).to be_nxn
     expect(edges.first.device).to be(:Switcher_1)
     expect(edges.first.input).to be(1)
@@ -172,8 +174,30 @@ Orchestrator::Testing.mock_device 'Aca::Router' do
 
     exec(:route, :c, :Left_LCD)
     nodes, = result
-    expect(nodes.map(&:id)).to contain_exactly(:c, :SubSwitchA__1, :Left_LCD)
+    expect(nodes).to contain_exactly(:c, :SubSwitchA__1, :Left_LCD)
 
     expect { exec(:route, :e, :Left_LCD) }.to \
         raise_error('no route from e to Left_LCD')
+
+    # -------------------------------------------------------------------------
+    section 'Edge maps'
+
+    exec(:build_edge_map, a: :Left_LCD, b: :Right_LCD)
+    edge_map = result
+    expect(edge_map.keys).to contain_exactly(:a, :b)
+    expect(edge_map[:a]).to be_a(Hash)
+    expect(edge_map[:a][:Left_LCD]).to be_a(Array)
+
+
+    # -------------------------------------------------------------------------
+    section 'Graph queries'
+
+    exec(:input_for, :a)
+    expect(result).to be(1)
+
+    exec(:input_for, :a, on: :Left_LCD)
+    expect(result).to be(:hdmi)
+
+    exec(:upstream, :g)
+    expect(result).to be(:Right_LCD)
 end
