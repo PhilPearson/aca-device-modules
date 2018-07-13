@@ -22,6 +22,7 @@ class Aca::MeetingRoom < Aca::Joiner
             self[:analytics] = setting(:analytics)
             self[:Camera] = setting(:Camera)
             self[:Wired] = setting(:Wired)
+            self[:vc_show_pres_layout] = setting(:vc_show_pres_layout)
             self[:hide_vc_sources] = setting(:hide_vc_sources)
             self[:mics_mutes] = setting(:mics_mutes)
             @confidence_monitor = setting(:confidence_monitor)
@@ -528,7 +529,9 @@ class Aca::MeetingRoom < Aca::Joiner
             # Update the inputs
             inps = (setting(:inputs) + (mode[:inputs] || [])) - (mode[:remove_inputs] || [])
             inps.uniq!
-            inps.each do |input|
+
+            # Camera is special
+            (inps + [:Camera]).uniq.each do |input|
                 inp = setting(input) || mode[input]
 
                 if inp
@@ -909,7 +912,7 @@ class Aca::MeetingRoom < Aca::Joiner
 
     def vc_mute(mute)
         vidconf = system[:VidConf]
-        vidconf.mute(mute) unless vidconf.nil?
+        vidconf.mute(mute) unless vidconf.nil? || setting(:disable_vc_mute)
         perform_action(mod: :System, func: :vc_mute_actual, args: [mute])
     end
 
@@ -949,6 +952,10 @@ class Aca::MeetingRoom < Aca::Joiner
             inp = src[:input]
             out = src[:output]
             system[:Switcher].switch({inp => out}) if inp && out
+            
+            # Enable or disable Cisco Speakertrack for this camera
+            speaker_track_setting = src[:auto_camera] # true/false/nil. When nil, no command is sent
+            system[:VidConf].speaker_track(speaker_track_setting) unless speaker_track_setting.nil?
         end
     end
 

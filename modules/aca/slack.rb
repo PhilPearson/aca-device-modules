@@ -66,6 +66,8 @@ class Aca::Slack
             User.bucket.set("slack-user-#{thread_id}", user.id)
 	    on_message(message.message)
         end
+        user.last_message_sent = Time.now.to_i * 1000
+        user.save!
     end
 
     def get_historic_messages
@@ -85,11 +87,15 @@ class Aca::Slack
             messages = JSON.parse(response.body)['messages']
             
             {
+                last_sent: user.last_message_sent,
+                last_read: user.last_message_read,
                 thread_id: thread_id,
                 messages: messages
             }
         else
             {
+                last_sent: user.last_message_sent,
+                last_read: user.last_message_read,
                 thread_id: nil,
                 messages: []
             }

@@ -23,6 +23,7 @@ module Cisco::TelePresence::SxSeriesCommon
         schedule.every('5s') do
             logger.debug "-- Polling Cisco SX"
             call_status
+            video_output_mode?
 
             if @count <= 0
                 mute_status
@@ -121,7 +122,7 @@ module Cisco::TelePresence::SxSeriesCommon
     end
     
     def clear_search_results
-        self[:search_results] = nil
+        self[:search_results] = []
     end
 
 
@@ -256,10 +257,6 @@ module Cisco::TelePresence::SxSeriesCommon
         else
             command :FarEndControl, :Camera, :Move, "CallId:#{call_id} Value:#{req}"
         end
-    end
-    
-    def wake(**options)
-        command :Standby, :Deactivate, params(options)
     end
     
     def wake(**options)

@@ -512,13 +512,31 @@ class Aca::OfficeBooking
     # =======================================
     def make_office_booking(user_email: nil, subject: 'On the spot booking', room_email:, start_time:, end_time:, organizer:)
 
+        STDERR.puts organizer
+        logger.info organizer
+
+        STDERR.puts organizer.class
+        logger.info organizer.class
+
+        STDERR.puts organizer.nil?
+        logger.info organizer.nil?
+
+        STDERR.flush
+
         booking_data = {
             subject: subject,
             start: { dateTime: start_time, timeZone: "UTC" },
             end: { dateTime: end_time, timeZone: "UTC" },
             location: { displayName: @office_room, locationEmailAddress: @office_room },
             attendees: [ emailAddress: { address: organizer, name: "User"}]
-        }.to_json
+        }
+
+
+        if organizer.nil?
+            booking_data[:attendees] = []
+        end
+
+        booking_data = booking_data.to_json
 
         logger.debug "Creating booking:"
         logger.debug booking_data
@@ -554,7 +572,7 @@ class Aca::OfficeBooking
         # Make the request
 
         # response = office_api.post(path: "#{domain}#{endpoint}", body: booking_data, headers: headers).value
-        response = @client.create_booking(room_id: system.id, start_param: start_time, end_param: end_time, subject: subject, current_user: {email: organizer, name: "User"})
+        response = @client.create_booking(room_id: system.id, start_param: start_time, end_param: end_time, subject: subject, current_user: nil)
         logger.debug response.body
         logger.debug response.to_json
         logger.debug response['id']
@@ -612,8 +630,10 @@ class Aca::OfficeBooking
         response.each{|booking| 
             # start_time = Time.parse(booking['start']['dateTime']).utc.iso8601[0..18] + 'Z'
             # end_time = Time.parse(booking['end']['dateTime']).utc.iso8601[0..18] + 'Z'
-            start_time = ActiveSupport::TimeZone.new('UTC').parse(booking['start']['dateTime']).iso8601
-            end_time = ActiveSupport::TimeZone.new('UTC').parse(booking['end']['dateTime']).iso8601
+            if booking['start'].key?("timeZone")
+                start_time = ActiveSupport::TimeZone.new(booking['start']['timeZone']).parse(booking['start']['dateTime']).utc.iso8601
+                end_time = ActiveSupport::TimeZone.new(booking['start']['timeZone']).parse(booking['end']['dateTime']).utc.iso8601
+            end
 
             if office_organiser_location == 'attendees'
                 # Grab the first attendee
