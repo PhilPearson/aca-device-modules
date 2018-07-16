@@ -10,6 +10,7 @@ class Cisco::Wireless::CmxZones
     descriptive_name 'Cisco CMX Zone Management'
     generic_name :FloorManagement
     implements :service
+    keepalive false
 
     default_settings({
         levels: {
@@ -33,9 +34,9 @@ class Cisco::Wireless::CmxZones
 
     def on_update
         @api_version = setting(:api_version) || 3
-        @levels = settings(:levels) || {}
+        @levels = setting(:levels) || {}
 
-        config({
+        defaults({
             headers: {
                 authorization: [setting(:username), setting(:password)]
             }
@@ -52,10 +53,13 @@ class Cisco::Wireless::CmxZones
             if response.status == 200
                 begin
                     data = JSON.parse(response.body)
-                    self[zone_id.to_s] = data['Count']
+                    # CMX bug on count key with the trailing space
+                    self[zone_id.to_s] = data['Count '] || data['Count']
                 rescue => e
                     :abort
                 end
+            elsif response.status == 401
+                login.then { get_count(zone_id) }
             else
                 :abort
             end
@@ -63,6 +67,17 @@ class Cisco::Wireless::CmxZones
     end
 
     protected
+
+    def login
+        post("/api/common/v#{@api_version}/login", name: :login) do |response|
+            if (200..299).include? response.status
+                :success
+            else
+                logger.error "CMX login error. Please check username and password."
+                :abort
+            end
+        end
+    end
 
     def build_zone_list
         @levels.each do |name, level|
