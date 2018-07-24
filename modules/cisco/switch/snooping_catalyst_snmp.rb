@@ -27,7 +27,9 @@ class Cisco::Switch::SnoopingCatalystSNMP
         snmp_options: {
             version: 1,
             community: 'public'
-        }
+        },
+        # Snooping takes ages on large switches
+        response_timeout: 60000
     })
 
     def on_load
@@ -225,7 +227,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
             logger.debug { "found #{entries.length} snooping entries" }
 
             # Newest lease first
-            entries.sort! { |a, b| b.leased_time <=> a.leased_time }
+            entries.reject! { |e| e.leased_time.nil? }.sort! { |a, b| b.leased_time <=> a.leased_time }
 
             checked = Set.new
             entries.each do |entry|
@@ -376,13 +378,17 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
         settings = setting(:snmp_options).to_h.symbolize_keys
         @transport&.close
-        @transport = settings[:proxy] = Protocols::Snmp.new(self)
+        @transport = settings[:proxy] = Protocols::Snmp.new(self, setting(:response_timeout) || 60000)
         @transport.register(@resolved_ip, remote_port)
         @client = NETSNMP::Client.new(settings)
         @community = settings[:community]
 
         # Grab the initial state
-        next_tick { query_connected_devices }
+        next_tick do
+            @processing = nil
+            @process_queue = []
+            query_connected_devices
+        end
 
         # Connected device polling (in case a trap was dropped by the network)
         # Also expires any desk reservations
@@ -402,6 +408,8 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
     # Ensures fair scheduling of work
     def process_next
+        logger.debug { "!Finished #{@processing} - processing next #{@process_queue.length}!" }
+
         if @process_queue.empty?
             # Allow the next request to occur
             @processing = nil
@@ -411,15 +419,14 @@ class Cisco::Switch::SnoopingCatalystSNMP
             # Next tick schedule will be killed when the module is stopped
             # i.e. this prevents infinite loops if requests take a long time
             # and the queue is never empty.
-            next_tick do
-                # pause for 1s
-                thread.sleep 1000
-
+            schedule.in(rand(1000)) do
                 # Allow the next request to occur
-                @processing = nil
+                if @processing == :waiting
+                    @processing = nil
 
-                # Perform the next request
-                __send__(@process_queue.shift) unless @process_queue.empty?
+                    # Perform the next request
+                    __send__(@process_queue.shift) unless @process_queue.empty?
+                end
             end
         end
         nil
@@ -427,7 +434,6 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
     def check_processing(process)
         return false unless @processing
-        return true if @processing == :waiting
 
         # Don't queue if currently being processed
         if @processing != process
