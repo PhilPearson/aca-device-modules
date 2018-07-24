@@ -29,7 +29,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
             community: 'public'
         },
         # Snooping takes ages on large switches
-        response_timeout: 3000
+        response_timeout: 5000
     })
 
     def on_load
@@ -78,6 +78,10 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
         td = ::Aca::TrapDispatcher.instance
         td.ignore(@resolved_ip) if @resolved_ip
+    end
+
+    def is_processing?
+        "IP resolved to #{@resolved_ip}\ntransport online #{!!@transport}\nprocessing #{!!@transport&.request}"
     end
 
     def hostname_resolution(ip)
@@ -358,7 +362,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
 
         settings = setting(:snmp_options).to_h.symbolize_keys
         @transport&.close
-        @transport = settings[:proxy] = Protocols::Snmp.new(self, setting(:response_timeout) || 3000)
+        @transport = settings[:proxy] = Protocols::Snmp.new(self, setting(:response_timeout) || 5000)
         @transport.register(@resolved_ip, remote_port)
         @client = NETSNMP::Client.new(settings)
         @community = settings[:community]
