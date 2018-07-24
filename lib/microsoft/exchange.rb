@@ -384,7 +384,7 @@ class Microsoft::Exchange
             end: new_booking.end.dup,
             subject: response_subject
         }
-        response[:attendees] = booking[:required_attendees] if booking.key?(:required_attendees)
+        response[:attendees] = attendees if attendees
         response
     end
 
