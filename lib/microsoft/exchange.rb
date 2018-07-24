@@ -377,15 +377,15 @@ class Microsoft::Exchange
         end
         
         new_booking = event.update_item!(booking)
-        response_attendees = new_booking.required_attendees.dup
         response_subject = new_booking.subject.dup
-        {
+        response = {
             id: new_booking.id.dup,
             start: new_booking.start.dup,
             end: new_booking.end.dup,
-            attendees: response_attendees,
             subject: response_subject
         }
+        response[:attendees] = booking[:required_attendees] if booking.key?('required_attendees')
+        response
     end
 
     def delete_booking(id)
