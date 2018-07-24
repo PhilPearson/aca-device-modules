@@ -377,19 +377,20 @@ class Microsoft::Exchange
         end
         
         new_booking = event.update_item!(booking)
-
-
-        {
-            id: new_booking.id,
-            start: new_booking.start,
-            end: new_booking.end,
-            attendees: new_booking.required_attendees,
-            subject: new_booking.subject
+        response_subject = new_booking.subject.dup
+        response = {
+            id: new_booking.id.dup,
+            start: new_booking.start.dup,
+            end: new_booking.end.dup,
+            subject: response_subject
         }
+        response[:attendees] = attendees if attendees
+        response
     end
 
-    def delete_booking(id)
-        booking = @ews_client.get_item(id)
+    def delete_booking(booking_id:, room_id:)
+        @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], room_id)
+        booking = @ews_client.get_item(booking_id)
         booking.delete!(:recycle, send_meeting_cancellations: "SendOnlyToAll")
     end
 
