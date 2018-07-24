@@ -378,14 +378,14 @@ class Microsoft::Exchange
         
         new_booking = event.update_item!(booking)
 
-
-        {
-            id: new_booking.id,
-            start: new_booking.start,
-            end: new_booking.end,
-            attendees: new_booking.required_attendees,
-            subject: new_booking.subject
-        }
+        # {
+        #     id: new_booking.id,
+        #     start: new_booking.start,
+        #     end: new_booking.end,
+        #     attendees: new_booking.required_attendees,
+        #     subject: new_booking.subject
+        # }
+        return {id: new_booking.id.dup}
     end
 
     def delete_booking(id)
