@@ -377,13 +377,14 @@ class Microsoft::Exchange
         end
         
         new_booking = event.update_item!(booking)
-
+        response_attendees = new_booking.required_attendees.dup
+        response_subject = new_booking.subject.dup
         {
             id: new_booking.id.dup,
             start: new_booking.start.dup,
             end: new_booking.end.dup,
-            attendees: new_booking.required_attendees.dup,
-            subject: new_booking.subject.dup
+            attendees: response_attendees,
+            subject: response_subject
         }
     end
 
