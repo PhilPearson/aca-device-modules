@@ -143,7 +143,7 @@ class Microsoft::Exchange
         STDERR.puts end_time
         STDERR.flush
 
-        rooms.each_slice(99).each do |room_subset|
+        rooms.each_slice(30).each do |room_subset|
 
             # Get booking data for all rooms between time range bounds
             user_free_busy = @ews_client.get_user_availability(room_subset,
