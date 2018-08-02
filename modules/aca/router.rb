@@ -156,6 +156,8 @@ class Aca::Router
     # Find the shortest path between between two nodes and return a list of the
     # nodes which this passes through and their connecting edges.
     def route(source, sink)
+        source = source.to_sym
+        sink = sink.to_sym
         path = paths[sink]
 
         distance = path.distance_to[source]
