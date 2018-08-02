@@ -158,6 +158,7 @@ class Aca::Router
     def route(source, sink)
         source = source.to_sym
         sink = sink.to_sym
+
         path = paths[sink]
 
         distance = path.distance_to[source]
@@ -408,6 +409,7 @@ class Aca::Router::SignalGraph
     end
 
     def [](id)
+        id = id.to_sym
         nodes[id]
     end
 
@@ -424,6 +426,7 @@ class Aca::Router::SignalGraph
     # to false to keep this O(1) rather than O(n). Using this flag at any other
     # time will result a corrupt structure.
     def delete(id, check_incoming_edges: true)
+        id = id.to_sym
         nodes.delete(id) { raise ArgumentError, "\"#{id}\" does not exist" }
         each { |node| node.edges.delete id } if check_incoming_edges
         self
@@ -442,6 +445,7 @@ class Aca::Router::SignalGraph
     end
 
     def include?(id)
+        id = id.to_sym
         nodes.key? id
     end
 
@@ -450,6 +454,7 @@ class Aca::Router::SignalGraph
     end
 
     def successors(id)
+        id = id.to_sym
         nodes[id].edges.keys
     end
 
@@ -469,6 +474,7 @@ class Aca::Router::SignalGraph
     end
 
     def outgoing_edges(id)
+        id = id.to_sym
         nodes[id].edges.values
     end
 
@@ -481,6 +487,8 @@ class Aca::Router::SignalGraph
     end
 
     def dijkstra(id)
+        id = id.to_sym
+
         active = Containers::PriorityQueue.new { |x, y| (x <=> y) == -1 }
         distance_to = Hash.new { 1.0 / 0.0 }
         predecessor = {}
