@@ -269,7 +269,6 @@ class Cisco::Switch::SnoopingCatalystSNMP
             @processing = nil
             client.close if client != @client
         }
-        @processing.value
 
         # Process the bindings
         entries = @processing.value.values
@@ -388,6 +387,7 @@ class Cisco::Switch::SnoopingCatalystSNMP
         return :currently_processing if @processing
 
         logger.debug '==> querying interface status <=='
+        @scheduled_status_query = false
 
         client = @client
         if_mappings = @if_mappings
