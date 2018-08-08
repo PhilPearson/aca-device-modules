@@ -13,7 +13,7 @@ class Wolfvision::Eye14
 
     # Communication settings
     tokenize indicator: /\x00|\x01|/, callback: :check_length
-    delay between_sends: 150
+    #delay between_sends: 150
 
     def on_load
         self[:zoom_max] = self[:iris_max] = 620
@@ -49,59 +49,53 @@ class Wolfvision::Eye14
 
     def power(state)
         target = is_affirmative?(state)
+        self[:power_target] = target
 
         # Execute command
         logger.debug { "Target = #{target} and self[:power] = #{self[:power]}" }
         if target == On && self[:power] == Off
-            send_cmd("\x30\x01\x01", name: :power, delay: 15000)
+            send_cmd("\x30\x01\x01", name: :power_cmd)
         elsif target == Off && self[:power] == On
-            send_cmd("\x30\x01\x00", name: :power, delay: 15000)
+            send_cmd("\x30\x01\x00", name: :power_cmd)
         end
-
-        # ensure the command ran successfully
-        self[:power_target] = target
-        power?
-        set_autofocus
     end
 
     # uses only optical zoom
     def zoom(position)
         val = in_range(position, self[:zoom_max], self[:zoom_min])
-                val = sprintf("%04X", val)
-                logger.debug { "position in decimal is #{position} and hex is #{val}" }
-        send_cmd("\x20\x02#{hex_to_byte(val)}")
-        self[:zoom] = position
+        self[:zoom_target] = val
+        val = sprintf("%04X", val)
+        logger.debug { "position in decimal is #{position} and hex is #{val}" }
+        send_cmd("\x20\x02#{hex_to_byte(val)}", name: :zoom_cmd)
     end
 
     def zoom?
-        send_inq("\x20\x00", priority: 0, inq: :zoom)
+        send_inq("\x20\x00", priority: 0, name: :zoom_inq)
     end
 
     # set autofocus to on
     def set_autofocus
-        send_cmd("\x31\x01\01", name: :set_autofocus)
+        send_cmd("\x31\x01\01", name: :autofocus_cmd)
     end
 
     def autofocus?
-        send_inq("\x31\00", priority: 0, inq: :autofocus)
+        send_inq("\x31\00", priority: 0, name: :autofocus_inq)
     end
 
     def iris(position)
         val = in_range(position, self[:iris_max], self[:iris_min])
-                val = sprintf("%04X", val)
-                logger.debug { "position in decimal is #{position} and hex is #{val}" }
-        send_cmd("\x22\x02#{hex_to_byte(val)}")
-        self[:iris] = position
+        self[:iris_target] = val
+        val = sprintf("%04X", val)
+        logger.debug { "position in decimal is #{position} and hex is #{val}" }
+        send_cmd("\x22\x02#{hex_to_byte(val)}", name: :iris_cmd)
     end
 
     def iris?
-        send_inq("\x22\x00", priority: 0, inq: :iris)
+        send_inq("\x22\x00", priority: 0, name: :iris_inq)
     end
 
-    def power?(options = {}, &block)
-        options[:emit] = block if block_given?
-        options[:inq] = :power
-        send_inq("\x30\x00", options)
+    def power?()
+        send_inq("\x30\x00", priority: 0, name: :power_inq)
     end
 
     def send_cmd(cmd, options = {})
@@ -112,56 +106,66 @@ class Wolfvision::Eye14
 
     def send_inq(inq, options = {})
         req = "\x00#{inq}"
-        logger.debug { "ask -- 0x#{byte_to_hex(req)} -- #{options[:inq]}" }
+        logger.debug { "ask -- 0x#{byte_to_hex(req)} -- #{options[:name]}" }
         send(req, options)
     end
 
     def received(data, deferrable, command)
-        logger.debug { "Received 0x#{byte_to_hex(data)}" }
-
-        return :success if command && command[:inq].nil?
+        logger.debug { "Received 0x#{byte_to_hex(data)}\n#{command}" }
 
         bytes = str_to_array(data)
-        case command[:inq]
-        when :power
-            # -1 index for array refers to the last element in Ruby
-            self[:power] = bytes[-1] == 1
 
-            # if power target is not nil and current power
-            if !self[:power_target].nil? && self[:power_target] != self[:power]
-                if self[:power_target] != self[:power]
-                     power(self[:power_target])
-                end
+        if command && !command[:name].nil?
+            case command[:name]
+            when :power_cmd
+                    self[:power] = self[:power_target] if byte_to_hex(data) == "3000"
+            when :zoom_cmd
+                    self[:zoom] = self[:zoom_target] if byte_to_hex(data) == "2000"
+            when :iris_cmd
+                    self[:iris] = self[:iris_target] if byte_to_hex(data) == "2200"
+            when :power_inq
+            # -1 index for array refers to the last element in Ruby
+                    self[:power] = bytes[-1] == 1
+            when :zoom_inq
+=begin
+        for some reason the after changing the zoom position
+        the first zoom inquiry sends "2000" regardless of the actaul zoom value
+        consecutive zoom inquiries will then return the correct zoom value
+=end
+                    hex = byte_to_hex(data[-2..-1])
+                    self[:zoom] = hex.to_i(16) unless byte_to_hex(data) == "2000"
+                    self[:zoom] = self[:zoom] if byte_to_hex(data) == "2000"
+                    #logger.debug { "zoom, hex is #{hex} = #{hex.to_i(16)} in decimal" }
+            when :autofocus_inq
+                    self[:autofocus] = bytes[-1] == 1
+            when :iris_inq
+                    # same thing as zoom inq happens here
+                    hex = byte_to_hex(data[-2..-1])
+                    self[:iris] = hex.to_i(16) unless byte_to_hex(data) == "2200"
+                    self[:iris] = self[:iris] if byte_to_hex(data) == "2200"
+                    #logger.debug{ "iris, hex is #{hex} = #{hex.to_i(16)} in decimal" }
             end
-        when :zoom
-            hex = byte_to_hex(data[-2..-1])
-            self[:zoom] = hex.to_i(16)
-            logger.debug { "zoom, hex is #{hex} = #{hex.to_i(16)} in decimal" }
-            # TODO
-        when :autofocus
-                self[:autofocus] = bytes[-1] == 1
-        when :iris
-                hex = byte_to_hex(data[-2..-1])
-                self[:iris] = hex.to_i
-                logger.debug{ "iris, hex is #{hex} = #{hex.to_i(16)} in decimal" }
         end
 
         return :success
     end
 
     def check_length(byte_str)
-                response = str_to_array(byte_str)
-                logger.debug { "#{response} length = #{response.length}" }
+        response = str_to_array(byte_str)
 
-                return false if response.length <= 2 # header is 2 bytes
+        return false if response.length <= 2 # header is 2 bytes
 
-                len = response[1] + 2 # (data length + header)
+        len = response[1] + 2 # (data length + header)
 
-                if response.length >= len
-                        return len
-                else
-                        return false
-                end
+        if response.length >= len
+                return len
+        else
+                return false
+        end
+    end
+
+        def test
+                send_inq("\x20\x00", priority: 0, name: :zoom_inq)
         end
 
 end
