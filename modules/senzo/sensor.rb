@@ -31,7 +31,7 @@ class Senzo::Sensor
 
     def on_update
         stop
-        @url = "https://backend.senzodata.com/api/sensor/live/4923?apikey=#{setting(:api_key)}"
+        @url = "https://backend.senzodata.com/api/sensor/live/4991?apikey=#{setting(:api_key)}"
     end
 
     # Return true when detected and false when not
