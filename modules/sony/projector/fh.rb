@@ -1,6 +1,8 @@
 # encoding: ASCII-8BIT
 # frozen_string_literal: true
 
+require 'shellwords'
+
 module Sony; end
 module Sony::Projector; end
 
@@ -41,7 +43,7 @@ class Sony::Projector::Fh
 
     def power?
         get("power_status").then do |response|
-            self[:mute] = (response=="on" ? true : false)
+            self[:power] = response == "on"
         end
     end
 
@@ -56,8 +58,8 @@ class Sony::Projector::Fh
     end
 
     def mute?
-        get "blank".then do |response|
-            self[:mute] = (response=="on" ? true : false)
+        get("blank").then do |response|
+            self[:mute] = response == "on"
         end
     end
 
@@ -82,7 +84,7 @@ class Sony::Projector::Fh
     end
 
     def input?
-        get "input".then |response|
+        get("input").then do |response|
             self[:input] = response.to_sym
         end
     end
@@ -100,7 +102,7 @@ class Sony::Projector::Fh
     [:contrast, :brightness, :color, :hue, :sharpness].each do |command|
         # Query command
         define_method :"#{command}?" do
-            get #{command}
+            get "#{command}"
         end
 
         # Set value command
@@ -110,15 +112,17 @@ class Sony::Projector::Fh
         end
     end
 
-    #protected
+    protected
 
     def received(response, resolve, command)
-        logger.debug { "Sony proj sent: #{response}" }
+        logger.debug { "Sony proj sent: #{response.inspect}" }
 
-        response = response.tr('"')
-        return :success if response == "ok"
-        return :abort if response == "error"
-        response
+        data = response.downcase.shellsplit
+
+        return :success if data[0] == "ok"
+        return :abort if data[0] == "error"
+        return data[1] if data.length > 0
+        data[0]
     end
 
     def do_poll
@@ -142,5 +146,4 @@ class Sony::Projector::Fh
         logger.debug { "sending: #{cmd}" }
         send("#{cmd}\r", options)
     end
-
-#end
+end
