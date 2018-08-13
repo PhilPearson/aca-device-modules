@@ -16,11 +16,12 @@ class Senzo::Sensor
     # get root node id
     # https://backend.senzodata.com/api/user/me?apikey=363497c3-7089-433a-9b20-671f57088cb7
 
-    # node stucture
-    # https://backend.senzodata.com/api/node/structure/4991?apikey=363497c3-7089-433a-9b20-671f57088cb7
+    # node stucture of root node
+    # https://backend.senzodata.com/api/node/structure/4993?apikey=363497c3-7089-433a-9b20-671f57088cb7
 
     # live sensor status
     # https://backend.senzodata.com/api/sensor/live/4991?apikey=363497c3-7089-433a-9b20-671f57088cb7
+    # https://backend.senzodata.com/api/node/status/4993?apikey=363497c3-7089-433a-9b20-671f57088cb7
     default_settings({
         api_key: '363497c3-7089-433a-9b20-671f57088cb7',
     })
@@ -30,7 +31,6 @@ class Senzo::Sensor
     end
 
     def on_update
-        stop
         @url = "https://backend.senzodata.com/api/sensor/live/4991?apikey=#{setting(:api_key)}"
     end
 
