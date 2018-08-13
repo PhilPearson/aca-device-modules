@@ -41,4 +41,10 @@ class Senzo::Sensor
         parsed = JSON.parse(ret) # parse the JSON string into a usable hash table
         presence = parsed[0]['inuse']
     end
+=begin
+    def get_csv(start_date, end_date)
+        url =   "https://backend.senzodata.com/api/csv/sensor/raw/4991?apikey=#{setting(:api_key)}
+                &startdate=#{start_date}&enddate=#{end_date}"
+    end
+=end
 end
