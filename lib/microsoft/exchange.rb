@@ -32,7 +32,7 @@ class Microsoft::Exchange
         STDERR.puts "At URL: #{@ews_url} with email: #{@service_account_email}"
         STDERR.puts '-------------------------------------------------'
         @ews_client ||= Viewpoint::EWSClient.new @ews_url, @service_account_email, @service_account_password, ews_opts
-    end 
+    end
 
     def basic_text(field, name)
         field[name][:text]
@@ -246,7 +246,7 @@ class Microsoft::Exchange
             bookings.push(booking)
         }
         bookings
-	rescue Exception => msg  
+	rescue Exception => msg
 	    STDERR.puts msg
 	    STDERR.flush
 	    return []
@@ -296,7 +296,7 @@ class Microsoft::Exchange
             attendee: { mailbox:  mailbox }
         }]
 
-        # Add the attendees 
+        # Add the attendees
         attendees.each do |attendee|
         # If we don't have an array of emails then it's an object in the form {email: "a@b.com", name: "Blahman Blahson"}
             if attendee.class != String
@@ -329,7 +329,7 @@ class Microsoft::Exchange
         elsif permission == 'impersonation'
             @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], mailbox)
             folder = @ews_client.get_folder(:calendar)
-        elsif permission == 'none' || permission.nil?   
+        elsif permission == 'none' || permission.nil?
             folder = @ews_client.get_folder(:calendar)
         end
 
@@ -381,7 +381,7 @@ class Microsoft::Exchange
         if permission == 'impersonation'
             @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], mailbox)
         end
-        
+
         new_booking = event.update_item!(booking)
         response_subject = new_booking.subject.dup
         response = {
@@ -394,15 +394,15 @@ class Microsoft::Exchange
         response
     end
 
-    def delete_booking(booking_id:, room_id:)
-        @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], room_id)
-        booking = @ews_client.get_item(booking_id)
+    def delete_booking(booking_id:, mailbox:)
+        @ews_client.set_impersonation(Viewpoint::EWS::ConnectingSID[:SMTP], mailbox)
+        booking = @ews_client.get_item(id)
         booking.delete!(:recycle, send_meeting_cancellations: "SendOnlyToAll")
         200
     end
 
     # Takes a date of any kind (epoch, string, time object) and returns a time object
-    def ensure_ruby_date(date) 
+    def ensure_ruby_date(date)
         if !(date.class == Time || date.class == DateTime)
             if string_is_digits(date)
 
@@ -415,9 +415,9 @@ class Microsoft::Exchange
                 end
 
                 # Convert to datetimes
-                date = Time.at(date)           
+                date = Time.at(date)
             else
-                date = Time.parse(date)                
+                date = Time.parse(date)
             end
         end
         return date
