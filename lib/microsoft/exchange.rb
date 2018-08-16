@@ -151,21 +151,21 @@ class Microsoft::Exchange
                 end_time:   end_time,
                 requested_view: :detailed,
                 time_zone: {
-                    bias: -480,
-                    standard_time: {
-                        bias: -60,
-                        time: "03:00:00",
-                        day_order: 1,
-                        month: 10,
-                        day_of_week: 'Sunday'
-                    },
-                    daylight_time: {
-                        bias: 0,
-                        time: "02:00:00",
-                        day_order: 1,
-                        month: 4,
-                        day_of_week: 'Sunday'
-                    }
+                    bias: -480
+                    # ,standard_time: {
+                    #     bias: -60,
+                    #     time: "03:00:00",
+                    #     day_order: 1,
+                    #     month: 10,
+                    #     day_of_week: 'Sunday'
+                    # },
+                    # daylight_time: {
+                    #     bias: 0,
+                    #     time: "02:00:00",
+                    #     day_order: 1,
+                    #     month: 4,
+                    #     day_of_week: 'Sunday'
+                    # }
                 }
             )
 
