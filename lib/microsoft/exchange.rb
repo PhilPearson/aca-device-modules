@@ -151,7 +151,7 @@ class Microsoft::Exchange
                 end_time:   end_time,
                 requested_view: :detailed,
                 time_zone: {
-                    bias: -600,
+                    bias: -480,
                     standard_time: {
                         bias: -60,
                         time: "03:00:00",
