@@ -126,9 +126,7 @@ class Microsoft::Exchange
         start_time = nil
         elems.each do |item|
             if item[time]
-                Time.use_zone 'Perth' do
-                    start_time = Time.parse(item[time][:text])
-                end
+                start_time = ActionController::TimeZone.new("UTC").parse(item[time][:text])
                 break
             end
         end
@@ -137,7 +135,8 @@ class Microsoft::Exchange
 
     def get_available_rooms(rooms:, start_time:, end_time:)
         free_rooms = []
-
+        start_time = start_time.utc
+        end_time = end_time.utc
         STDERR.puts "Getting available rooms with"
         STDERR.puts start_time
         STDERR.puts end_time
@@ -151,7 +150,7 @@ class Microsoft::Exchange
                 end_time:   end_time,
                 requested_view: :detailed,
                 time_zone: {
-                    bias: -480,
+                    bias: -0,
                     standard_time: {
                         bias: 0,
                         time: "03:00:00",
@@ -180,8 +179,8 @@ class Microsoft::Exchange
                     if resp.length == 0
                         free_rooms.push(room_subset[index])
                     elsif resp.length == 1
-                        free_rooms.push(room_subset[index]) if find_time(resp[0], :start_time) == end_time
-                        free_rooms.push(room_subset[index]) if find_time(resp[0], :end_time) == start_time
+                        free_rooms.push(room_subset[index]) if find_time(resp[0], :start_time).to_i == end_time.to_i
+                        free_rooms.push(room_subset[index]) if find_time(resp[0], :end_time).to_i == start_time.to_i
                     end
                 elsif resp.length == 0
                     # If response length is 0 then the room is free
