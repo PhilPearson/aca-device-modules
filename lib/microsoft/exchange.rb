@@ -151,8 +151,8 @@ class Microsoft::Exchange
                 end_time:   end_time,
                 requested_view: :detailed,
                 time_zone: {
-                    bias: -480
-                    ,standard_time: {
+                    bias: -480,
+                    standard_time: {
                         bias: 0,
                         time: "03:00:00",
                         day_order: 1,
