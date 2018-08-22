@@ -126,7 +126,7 @@ class Microsoft::Exchange
         start_time = nil
         elems.each do |item|
             if item[time]
-                Time.use_zone 'Sydney' do
+                Time.use_zone 'Perth' do
                     start_time = Time.parse(item[time][:text])
                 end
                 break
