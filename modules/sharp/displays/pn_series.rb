@@ -8,7 +8,6 @@ class Sharp::Displays::PnSeries
     include ::Orchestrator::Constants
     include ::Orchestrator::Transcoder
 
-
     # Discovery Information
     tcp_port 10008
     descriptive_name 'Sharp LCD Monitor'
@@ -60,7 +59,6 @@ class Sharp::Displays::PnSeries
         schedule.clear
     end
 
-
     #
     # Power commands
     #
@@ -94,13 +92,11 @@ class Sharp::Displays::PnSeries
         block.call(self[:power]) unless block.nil?
     end
 
-
     def power_state?(options = {}, &block)
         options[:emit] = block unless block.nil?
         options.merge!({:timeout => 10000, :value_ret_only => :POWR})
         do_send('POWR????', options)
     end
-
 
     #
     # Resets the brightness and contrast settings
@@ -109,20 +105,19 @@ class Sharp::Displays::PnSeries
         do_send('ARST   2')
     end
 
-
     #
     # Input selection
     #
     INPUTS = {
         :dvi => 'INPS0001', 1 => :dvi,
-        :hdmi => 'INPS0010', 10 => :hdmi,
-        :hdmi2 => 'INPS0013', 13 => :hdmi2,
-        :hdmi3 => 'INPS0018', 18 => :hdmi3,
-        :display_port => 'INPS0014', 14 => :display_port,
         :vga => 'INPS0002', 2 => :vga,
-        :vga2 => 'INPS0016', 16 => :vga2,
         :component => 'INPS0003', 3 => :component,
-        :unknown => 'INPS????'
+        :video => 'INPS0004', 4 => :component,
+        #:rgb => 'INPS0006', 6 => :rgb,
+        #:dvi2 => 'INPS0007', 7 => :dvi2,
+        :svideo => 'INPS0008', 8 => :svideo,
+        :hdmi => 'INPS0009', 9 => :hdmi,
+        #:hdmi2 => 'INPS0010', 10 => :hdmi2
     }
     def switch_to(input)
         input = input.to_sym if input.class == String
@@ -162,7 +157,6 @@ class Sharp::Displays::PnSeries
         resp
     end
 
-
     #
     # Auto adjust
     #
@@ -170,13 +164,11 @@ class Sharp::Displays::PnSeries
         do_send('AGIN   1', :timeout => 20000)
     end
 
-
     #
     # Value based set parameter
     #
     def brightness(val)
-        val = 31 if val > 31
-        val = 0 if val < 0
+        val = in_range(val, self[:brightness_max], self[:brightness_min])
 
         message = "VLMP"
         message += val.to_s.rjust(4, ' ')
@@ -185,8 +177,7 @@ class Sharp::Displays::PnSeries
     end
 
     def contrast(val)
-        val = 60 if val > 60
-        val = 0 if val < 0
+        val = in_range(val, self[:contrast_max], self[:contrast_min])
 
         val = val * 2 if self[:input] == :vga && self[:dbl_contrast]     # See sharp Manual
 
@@ -197,8 +188,7 @@ class Sharp::Displays::PnSeries
     end
 
     def volume(val)
-        val = 31 if val > 31
-        val = 0 if val < 0
+        val = in_range(val, self[:volume_max], self[:volume_min])
 
         message = "VOLM"
         message += val.to_s.rjust(4, ' ')
@@ -303,7 +293,6 @@ class Sharp::Displays::PnSeries
         return true # Command success?
     end
 
-
     def do_poll
         power_state? do
             result = self[:power]
@@ -319,13 +308,12 @@ class Sharp::Displays::PnSeries
         end
     end
 
-
     private
 
     def determine_contrast_mode
-        # As of 09/2015 only the PN-L802B does not have double contrast on RGB input. 
-        # All prior models do double the contrast and don't have an L so let's assume it's the L in the model number that determines this for now 
-        # (we can confirm the logic as more models are released) 
+        # As of 09/2015 only the PN-L802B does not have double contrast on RGB input.
+        # All prior models do double the contrast and don't have an L so let's assume it's the L in the model number that determines this for now
+        # (we can confirm the logic as more models are released)
         if self[:model_number] =~ /L/
             self[:dbl_contrast] = false
         end
@@ -335,7 +323,6 @@ class Sharp::Displays::PnSeries
         do_send(setting(:username) || '',  { delay: 500, wait: false, priority: 100 })
         do_send((setting(:password) || ''), { delay_on_receive: 1000, priority: 100 })
     end
-
 
     OPERATION_CODE = {
         :video_input => 'INPS????',
@@ -363,12 +350,11 @@ class Sharp::Displays::PnSeries
         end
     end
 
-
     #
     # Builds the command and creates the checksum
     #
     def do_send(command, options = {})
-        #logger.debug "-- Sharp LCD, sending: #{command}"
+        logger.debug "-- Sharp LCD, sending: #{command}"
 
         command = command.clone
         command << 0x0D << 0x0A
@@ -376,4 +362,3 @@ class Sharp::Displays::PnSeries
         send(command, options)
     end
 end
-
