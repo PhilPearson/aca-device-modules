@@ -127,6 +127,41 @@ class Aca::Router
         edges.map(&:device)
     end
 
+    # Given a sink id, find the chain of devices that sit immediately upstream
+    # in the signal path. The returned list will include all devices which for
+    # a static, linear chain exists before any routing is possible
+    #
+    # This may be used to find devices that are installed for the use of this
+    # output only (decoders, image processors etc).
+    #
+    # If the sink itself has mutiple inputs, the input to retrieve the chain for
+    # may be specified with the `on_input` param.
+    def upstream_devices_of(sink, on_input: nil)
+        device_chain = []
+
+        # Bail out early if there's no linear signal path from the sink
+        return device_chain unless on_input || signal_graph.outdegree(sink) == 1
+
+        # Otherwise, grab the initial edge from the sink node
+        initial = signal_graph[sink].edges.values.find do |edge|
+            if on_input
+                edge.input == on_input.to_sym
+            else
+                true
+            end
+        end
+
+        # Then walk the graph and accumulate devices until we reach a branch
+        edges = signal_graph[initial.target].edges
+        until edges.empty? || edges.size > 1
+            _, edge = edges.first
+            device_chain << edge.device
+            edges = signal_graph[edge.target].edges
+        end
+
+        device_chain
+    end
+
 
     # ------------------------------
     # Internals
@@ -378,7 +413,7 @@ class Aca::Router::SignalGraph
         def initialize(id)
             @id = id.to_sym
             @edges = Hash.new do |_, other_id|
-                raise ArgumentError, "No edge from \"#{id}\" to \"#{other_id}\""
+                raise ArgumentError, "No edge from \"#{@id}\" to \"#{other_id}\""
             end
         end
 
@@ -485,7 +520,8 @@ class Aca::Router::SignalGraph
     end
 
     def outdegree(id)
-        outgoing_edges(id).size
+        id = id.to_sym
+        nodes[id].edges.size
     end
 
     def dijkstra(id)
