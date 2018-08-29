@@ -109,15 +109,15 @@ class Sharp::Displays::PnSeries
     # Input selection
     #
     INPUTS = {
-        :dvi => 'INPS0001', 1 => :dvi,
-        :vga => 'INPS0002', 2 => :vga,
-        :component => 'INPS0003', 3 => :component,
-        :video => 'INPS0004', 4 => :component,
-        #:rgb => 'INPS0006', 6 => :rgb,
-        #:dvi2 => 'INPS0007', 7 => :dvi2,
-        :svideo => 'INPS0008', 8 => :svideo,
-        :hdmi => 'INPS0009', 9 => :hdmi,
-        #:hdmi2 => 'INPS0010', 10 => :hdmi2
+        :dvi => 'INPS0001', 1 => :dvi, # pc dvi
+        :vga => 'INPS0002', 2 => :vga, # pc vga
+        :video => 'INPS0004', 4 => :video, # av video
+        :rgb => 'INPS0006', 6 => :rgb, # pc rgb
+        :svideo => 'INPS0008', 8 => :svideo, # av svideo
+        :hdmi => 'INPS0009', 9 => :hdmi # this hdmi is av
+        #:hdmi => 'INPS0010', 10 => :hdmi, # pc hdmi
+        #:component => 'INPS0003', 3 => :component, # av component will conflict with pc rgb
+        #:dvi2 => 'INPS0007', 7 => :dvi2, # av dvi will conflict with pc dvi
     }
     def switch_to(input)
         input = input.to_sym if input.class == String
@@ -133,28 +133,38 @@ class Sharp::Displays::PnSeries
         resp
     end
 
+    AUDIO_PREFIX = {
+        :dvi => 'ASDP',
+        :vga => 'ASAP',
+        :video => 'ASVA',
+        :rgb => 'ASCP',
+        :svideo => 'ASSA',
+        :hdmi => 'ASHA'
+        #:hdmi => 'ASHP' # this is audio for hdmi pc
+    }
     AUDIO = {
-        :audio1 => 'ASDP   2',
-        :audio2 => 'ASDP   3',
-        :dvi => 'ASDP   1',
-        :dvi_alt => 'ASDA   1',
-        :hdmi => 'ASHP   0',
-        :hdmi_3mm => 'ASHP   1',
-        :hdmi_rca => 'ASHP   2',
-        :vga => 'ASAP   1',
-        :component => 'ASCA   1'
+        :hdmi => '0',
+        :aux => '1',
+        :rca => '2',
+        :rca2 => '3'
     }
     def switch_audio(input)
         input = input.to_sym if input.class == String
-        self[:audio] = input
+        video_input = self[:input]
 
-        resp = do_send(AUDIO[input], :name => :audio)
-        mute_status(40)        # higher status than polling commands - lower than input switching
-        #volume_status(40)    # Mute response requests volume
+        # switch audio all the time except for when video input is not hdmi but hdmi audio is selected
+        if input == :hdmi && video_input != :hdmi
+            logger.debug { "-- Error, Sharp LCD requested to switch audio to: hdmi but video input is not hdmi" }
+        else
+            self[:audio] = input
+            resp = do_send("#{AUDIO_PREFIX[video_input]}   #{AUDIO[input]}", :name => :audio)
+            mute_status(40)        # higher status than polling commands - lower than input switching
+            #volume_status(40)    # Mute response requests volume
 
-        logger.debug { "-- Sharp LCD, requested to switch audio to: #{input}" }
+            logger.debug { "-- Sharp LCD, requested to switch audio to: #{input}" }
 
-        resp
+            resp
+        end
     end
 
     #
