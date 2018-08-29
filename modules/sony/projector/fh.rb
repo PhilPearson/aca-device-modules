@@ -90,7 +90,7 @@ class Sony::Projector::Fh
     end
 
     def lamp_time?
-        get "timer"
+        #get "timer"
     end
 
 
@@ -117,11 +117,12 @@ class Sony::Projector::Fh
     def received(response, resolve, command)
         logger.debug { "Sony proj sent: #{response.inspect}" }
 
-        data = response.downcase.shellsplit
+        data = response.strip.downcase.shellsplit
+        logger.debug { "Sony proj sent: #{data}" }
 
         return :success if data[0] == "ok"
-        return :abort if data[0] == "error"
-        return data[1] if data.length > 0
+        return :abort if data[0] == "err_cmd"
+        #return data[1] if data.length > 1
         data[0]
     end
 
@@ -136,14 +137,14 @@ class Sony::Projector::Fh
     end
 
     def get(path, **options)
-        cmd = ["#{path} ?"]
+        cmd = "#{path} ?\r\n"
         logger.debug { "requesting: #{cmd}" }
-        send("#{cmd}\r", options)
+        send(cmd, options)
     end
 
     def set(path, arg, **options)
-        cmd = [path, " \"#{arg}\""]
+        cmd = "#{path} \"#{arg}\"\r\n"
         logger.debug { "sending: #{cmd}" }
-        send("#{cmd}\r", options)
+        send(cmd, options)
     end
 end
