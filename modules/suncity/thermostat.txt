@@ -1,0 +1,23 @@
+Modbus RTU RS-485 Baud Rate:9600
+
+Coil
+00001 Len. 8bit
+(Hi)
+Valve		0:OFF 1:ON
+x
+x
+x
+Hi
+Mid
+Lo
+x
+(Low)
+
+Input Reg.
+30001 Current Temp.
+
+Holding Reg.
+40003 Power	0:OFF 1:ON
+40004 Mode	1:COOL 2:HEAT 3:FRESH_AIR
+40005 Set Point	160~300
+40006 Fan Speed	0:HI 1:MID 2:LO 3:AUTO
