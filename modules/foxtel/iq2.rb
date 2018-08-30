@@ -22,6 +22,7 @@ class Foxtel::Iq2
 
     # Here for compatibility
     def power(state = true, **options)
+        logger.debug 'toggling power'
         do_send('1,37000,1,1,16,10,6,10,6,22,6,10,6,16,6,22,6,22,6,10,6,10,6,10,6,22,6,16,6,22,6,10,6,10,6,28,6,10,6,3237')
         true
     end
@@ -33,6 +34,7 @@ class Foxtel::Iq2
         down: '1,37000,1,1,16,10,6,10,6,22,6,10,6,16,6,22,6,22,6,10,6,10,6,10,6,22,6,16,6,22,6,16,6,16,6,22,6,16,6,322'
     }
     def cursor(direction, **options)
+        logger.debug { "cursor #{direction}" }
         val = DIRECTIONS[direction.to_sym]
         raise "invalid direction #{direction}" unless val
         do_send(val)
@@ -50,12 +52,14 @@ class Foxtel::Iq2
         when 7 then '1,37000,1,1,16,10,6,10,6,22,6,10,6,16,6,22,6,22,6,10,6,10,6,10,6,22,6,16,6,22,6,10,6,10,6,16,6,28,6,323'
         when 8 then '1,37000,1,1,16,10,6,10,6,22,6,10,6,16,6,22,6,22,6,10,6,10,6,10,6,22,6,16,6,22,6,10,6,10,6,22,6,10,6,324'
         when 9 then '1,37000,1,1,16,10,6,10,6,22,6,10,6,16,6,22,6,22,6,10,6,10,6,10,6,22,6,16,6,22,6,10,6,10,6,22,6,16,6,323'
+        else raise ArgumentError, 'num may only be used for single digits, use #channel otherwise'
         end
         do_send(val)
     end
 
     # Make compatible with IPTV systems
     def channel(number)
+        logger.debug { "switching to channel #{channel}" }
         number.to_s.each_char do |char|
             num(char)
         end
@@ -73,6 +77,7 @@ class Foxtel::Iq2
     # Automatically creates a callable function for each command
     COMMANDS.each do |command, value|
         define_method command do |**options|
+            logger.debug { "sending #{command}" }
             do_send(value)
         end
     end
