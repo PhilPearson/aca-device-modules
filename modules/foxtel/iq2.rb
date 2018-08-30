@@ -59,7 +59,7 @@ class Foxtel::Iq2
 
     # Make compatible with IPTV systems
     def channel(number)
-        logger.debug { "switching to channel #{channel}" }
+        logger.debug { "switching to channel #{number}" }
         number.to_s.each_char do |char|
             num(char)
         end
