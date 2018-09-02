@@ -73,7 +73,6 @@ class Suncity::Thermostat
         send_req(request, :name => :point)
     end
 
-
     SPEED = {
         :high => 0,
         :mid => 1,
@@ -87,12 +86,14 @@ class Suncity::Thermostat
     end
 
     def fanspeed(speed)
+        speed = speed.to_sym if speed.class == String
+
         request = @modbus.write_holding_registers(40006, SPEED[state])
         send_req(request, :name => :fanspeed)
     end
 
     def send_req(req, options = {})
-        logger.debug { "Sending #{options[:name]}" }
+        logger.debug { "Sending #{req} #{options[:name]}" }
         byte_string = req.to_binary_s serial: @use_serial
         send(byte_string, options)
     end
