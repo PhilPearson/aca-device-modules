@@ -101,6 +101,28 @@ class Aca::Tracking::LocateUser
         end
     end
 
+    # This is used to directly map MAC addresses to usernames
+    # Typically from a RADIUS server like MS Network Policy Server
+    def associate(*macs)
+        macs.each do |mac, login|
+            begin
+                username = ::User.bucket.get("macuser-#{mac}", quiet: true)
+                # Don't overwrite domain controller discoveries
+                # This differentiates BYOD from business devices
+                if username.nil? || username.start_with?('byod_')
+                    parts = login.split("\\")
+                    login = parts[-1]
+                    domain = parts[0]
+
+                    user = ::Aca::Tracking::UserDevices.for_user("byod_#{login}", domain)
+                    user.add(mac)
+                end
+            rescue => e
+                logger.print_error(e, "associating MAC #{mac} to #{login}")
+            end
+        end
+    end
+
     # For use with shared desktop computers that anyone can log into
     # Optimally only these machines should trigger this web hook
     def logout(ip, login, domain = nil)
