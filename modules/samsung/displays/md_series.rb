@@ -106,7 +106,8 @@ DESC
         :net_standby => 0xB5,   # Keep NIC active in standby
         :eco_solution => 0xE6,  # Eco options (auto power off)
         :auto_power => 0x33,
-        :screen_split => 0xB2    # Tri / quad split (larger panels only)
+        :screen_split => 0xB2,  # Tri / quad split (larger panels only),
+        :osd => 0x70            # On screen display on/off
     }
     COMMAND.merge!(COMMAND.invert)
 
@@ -326,7 +327,8 @@ DESC
         :tint,
         :red_gain,
         :green_gain,
-        :blue_gain
+        :blue_gain,
+        :osd
     ]
     #
     # Push any configured device settings
