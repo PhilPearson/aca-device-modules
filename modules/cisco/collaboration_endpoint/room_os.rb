@@ -183,7 +183,7 @@ class Cisco::CollaborationEndpoint::RoomOs
 
             if result
                 if result['status'] == 'OK'
-                    :success
+                    result
                 else
                     logger.error result['Reason']
                     :abort
@@ -234,14 +234,7 @@ class Cisco::CollaborationEndpoint::RoomOs
             send_xconfiguration path.join(' '), setting, value
         end
 
-        thread.finally(interactions).then do |results|
-            resolved = results.map(&:last)
-            if resolved.all?
-                :success
-            else
-                thread.defer.reject 'Failed to apply all settings.'
-            end
-        end
+        thread.all(*interactions).then { :success }
     end
 
     # Query the device's current status.
@@ -252,25 +245,22 @@ class Cisco::CollaborationEndpoint::RoomOs
     def send_xstatus(path)
         request = Action.xstatus path
 
-        defer = thread.defer
-
         do_send request do |response|
             path_components = Action.tokenize path
             status_response = response.dig 'Status', *path_components
 
             if !status_response.nil?
-                yield status_response if block_given?
-                defer.resolve status_response
-                :success
+                if block_given?
+                    yield status_response
+                else
+                    status_response
+                end
             else
                 error = response.dig 'CommandResponse', 'Status'
                 logger.error "#{error['Reason']} (#{error['XPath']})"
-                defer.reject
                 :abort
             end
         end
-
-        defer.promise
     end
 
 
@@ -342,7 +332,7 @@ class Cisco::CollaborationEndpoint::RoomOs
                 if block_given?
                     yield response
                 else
-                    :success
+                    response
                 end
             else
                 :ignore
