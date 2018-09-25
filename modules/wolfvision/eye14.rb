@@ -52,9 +52,6 @@ class Wolfvision::Eye14
     def power(state)
         target = is_affirmative?(state)
         self[:power_target] = target
-
-        # Execute command
-        logger.debug { "Target = #{target} and self[:power] = #{self[:power]}" }
         if target == On && self[:power] != On
             send_cmd('300101', name: :power_cmd)
         elsif target == Off && self[:power] != Off
@@ -103,9 +100,6 @@ class Wolfvision::Eye14
     def laser(state)
         target = is_affirmative?(state)
         self[:laser_target] = target
-
-        # Execute command
-        logger.debug { "Target = #{target} and self[:laser] = #{self[:laser]}" }
         if target == On && self[:laser] != On
             send_cmd('A70101', name: :laser_cmd)
         elsif target == Off && self[:laser] != Off
@@ -131,40 +125,54 @@ class Wolfvision::Eye14
         send(req, options)
     end
 
+    COMMANDS = {
+        '3000' => :power_cmd,
+        '3001' => :power_inq,
+        '2000' => :zoom_cmd,
+        '2002' => :zoom_inq,
+        '2200' => :iris_cmd,
+        '2202' => :iris_inq,
+        '3100' => :autofocus_cmd,
+        '3101' => :autofocus_inq,
+        'a700' => :laser_cmd,
+        'a701' => :laser_inq
+    }
     def received(data, deferrable, command)
         logger.debug { "Received 0x#{byte_to_hex(data)}\n" }
 
         bytes = str_to_array(data)
 
         return :success if command.nil? || command[:name].nil?
-        case command[:name]
+
+        cmd = COMMANDS[byte_to_hex(data)[0..3]]
+
+        case cmd
         when :power_cmd
-            self[:power] = self[:power_target] if byte_to_hex(data) == '3000'
-        when :zoom_cmd
-            self[:zoom] = self[:zoom_target] if byte_to_hex(data) == '2000'
-        when :iris_cmd
-            self[:iris] = self[:iris_target] if byte_to_hex(data) == '2200'
-        when :autofocus_cmd
-            self[:autofocus] = true if byte_to_hex(data) == '3100'
+            self[:power] = self[:power_target]
         when :power_inq
-            # -1 index for array refers to the last element in Ruby
             self[:power] = bytes[-1] == 1
-        when :zoom_inq
+        when :zoom_cmd
             # for some reason the after changing the zoom position
             # the first zoom inquiry sends "2000" regardless of the actaul zoom value
             # consecutive zoom inquiries will then return the correct zoom value
-            return :ignore if byte_to_hex(data) == '2000'
+            return :ignore if command[:name] == :zoom_inq
+            self[:zoom] = self[:zoom_target]
+        when :zoom_inq
             hex = byte_to_hex(data[-2..-1])
             self[:zoom] = hex.to_i(16)
-        when :autofocus_inq
-            self[:autofocus] = bytes[-1] == 1
+        when :iris_cmd
+            return :ignore if command[:name] == :iris_inq
+            self[:iris] = self[:iris_target]
         when :iris_inq
             # same thing as zoom inq happens here
-            return :ignore if byte_to_hex(data) == '2200'
             hex = byte_to_hex(data[-2..-1])
             self[:iris] = hex.to_i(16)
+        when :autofocus_cmd
+            self[:autofocus] = true
+        when :autofocus_inq
+            self[:autofocus] = bytes[-1] == 1
         when :laser_cmd
-            self[:laser] = self[:laser_target] if byte_to_hex(data) == 'a700'
+            self[:laser] = self[:laser_target]
         when :laser_inq
             self[:laser] = bytes[-1] == 1
         end
