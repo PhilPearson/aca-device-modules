@@ -12,6 +12,7 @@ class Senzo::Sensor
 
     default_settings({
         api_key: '363497c3-7089-433a-9b20-671f57088cb7',
+        desk_ids: ['Will', 'Steve', 'Cam', 'Meeting']
     })
 
     def on_load
@@ -25,13 +26,16 @@ class Senzo::Sensor
 
         level_occupancy('Sydney')
         # Schedule every 2 minutes as sensors only update every 2 minutes anyway
-        schedule.every('2m') do
+        schedule.every('1m') do
             level_occupancy('Sydney')
         end
     end
 
     def add_desks
         # get the root node id
+        logger.debug(setting(:desk_ids))
+        @desk_ids = setting(:desk_ids)
+
         url = "https://backend.senzodata.com/api/user/me?apikey=#{setting(:api_key)}"
         ret = Net::HTTP.get(URI.parse(url))
         parsed = JSON.parse(ret) # parse the JSON string into a usable hash table
