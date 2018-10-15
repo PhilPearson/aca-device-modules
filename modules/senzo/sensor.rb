@@ -26,7 +26,7 @@ class Senzo::Sensor
 
         level_occupancy('Sydney')
         # Schedule every 2 minutes as sensors only update every 2 minutes anyway
-        schedule.every('1m') do
+        schedule.every('2m') do
             level_occupancy('Sydney')
         end
     end
